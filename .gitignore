@@ -1,0 +1,62 @@
+# =============================================================================
+# Operation Long Haul — hardened ignore list
+#
+# This repo is DOCUMENTATION ONLY. No secrets, state, or generated runtime
+# artifacts should ever land here. The patterns below are the primary control
+# that makes publishing this repo safe — keep them broad and err on caution.
+# If you ever add tooling/config to this repo, re-check this list first.
+# =============================================================================
+
+# --- Secrets & credentials -------------------------------------------------
+*.env
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt.key
+id_rsa*
+id_ed25519*
+*_rsa
+*.gpg
+*.asc
+
+# OpenBao / Vault init + unseal material, GCP KMS SA keys
+vault-init*.json
+*vault-unseal*
+*-sa.json
+gcp-kms.json
+recovery-keys*
+unseal-keys*
+
+# Talos machine secrets, kubeconfigs
+talos-secrets*.yaml
+*.kubeconfig
+kubeconfig*
+admin.conf
+
+# Huly generated config (sensitive) + workspace backups
+huly_v7.conf
+huly-backups/
+*.backup
+
+# --- IaC state & provider caches -------------------------------------------
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+crash.log
+override.tf
+override.tf.json
+
+# --- Local tooling / editor / OS -------------------------------------------
+**/.claude/settings.local.json
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
