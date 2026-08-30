@@ -15,7 +15,7 @@
 - **4.1** — Flagger installation (progressive delivery)
 - **4.2** — Kustomize overlays + Flux Kustomizations for env promotion
 - **4.3** — *(removed; Argo Events relocated to Tier 5 MLOps — ADR-003)*
-- **4.4** — Declarative Keycloak realm via Terraform
+- **4.4** — Keycloak realm: extending the declarative model *(rescoped v5.3 — ADR-010; the old UI-bootstrap migration is gone)*
 - **4.5** — Custom OTel app: end-to-end production deployment story
 - **4.6** — ARC (Actions Runner Controller) for self-hosted runners
 - **4.7–4.11** — *Deferred to post-Tier-5*: Vaultwarden, n8n, NetBox, Forgejo, Immich (see Tier 5 doc)
@@ -197,20 +197,34 @@ What replaces the v4 platform uses of Argo Events:
 
 ---
 
-### Phase 4.4: Declarative Keycloak Realm via Terraform
+### Phase 4.4: Keycloak Realm — Extending the Declarative Model *(rescoped v5.3)*
 
-**Goal:** What was bootstrapped manually in Tier 3 Phase 3.13c becomes code. Future realm changes go through PR.
+**Goal:** The realm is *already* code as of Phase 3.13c (ADR-010) — it ships as a `KeycloakRealmImport` from the first apply. This phase no longer performs a migration. It decides where the realm-as-code boundary sits long term, and moves the parts that outgrow a single CR into the Terraform provider.
 
-#### 4.4a — Terraform setup
+> **What changed in v5.3.** Earlier revisions bootstrapped the realm by hand in the UI (3.13c) and reconciled it here with `tofu import` plus hand-copied client UUIDs. **That import step is deleted** — there is nothing to import, because nothing was created by hand. See ADR-010. If you are reading this having already built Tier 3 from an older revision of the doc, the old 4.4c import procedure is preserved in git history.
+>
+> **Choose one owner per resource — do not split.** `KeycloakRealmImport` and the Terraform provider will fight over anything both manage. The recommended boundary:
+>
+> | Resource | Owner | Why |
+> |---|---|---|
+> | Realm settings, groups, core platform clients (flux-ui, grafana, harbor, vault, oauth2-proxy) | **`KeycloakRealmImport`** (Flux) | Reconciles with the cluster; no second tool needed for the critical path; survives a mgmt rebuild via GitOps alone |
+> | Per-tenant clients/groups generated at scale (Tier 5 `mlops-*`, future Backstage scaffolder output) | **Terraform** | Needs `for_each` over a tenant list, outputs consumed by other TF, and cross-system wiring (namespace + Keycloak group + S3 path in one apply) |
+> | Client *secrets* | **Neither** — Vault, materialized by ESO | Never in Git, either way |
+>
+> If Tier 5 tenancy never grows past a handful of tenants, the honest answer is to skip the Terraform environment entirely and keep everything in the CR. Decide with evidence at Tier 5, not now.
+
+#### 4.4a — Terraform setup *(only if the boundary above says you need it)*
 
 New environment in `homelab-terraform/environments/keycloak/`:
 
 ```hcl
 terraform {
   required_providers {
+    # v5.3: `mrparkers/keycloak` is deprecated — the maintained community provider
+    # is `keycloak/keycloak`. Verify the current major at build time.
     keycloak = {
-      source  = "mrparkers/keycloak"
-      version = "~> 4.4"
+      source  = "keycloak/keycloak"
+      version = "~> 5.0"
     }
     vault = {
       source  = "hashicorp/vault"
@@ -312,26 +326,19 @@ resource "keycloak_generic_client_protocol_mapper" "groups" {
 }
 ```
 
-#### 4.4c — Import existing state
+#### 4.4c — ~~Import existing state~~ *(removed in v5.3 — ADR-010)*
 
-Critical step — we manually created clients in Tier 3. Terraform must import them rather than recreate:
+There is nothing to import. The realm and its platform clients were declarative from their first apply in Phase 3.13c, so the old `tofu import` + hand-copied-UUID procedure no longer applies. If you adopt Terraform for the tenant-scoped slice per the boundary table above, it manages only resources it creates.
 
-```bash
-source ../../scripts/vault-login.sh
-tofu init
-tofu import keycloak_realm.homelab homelab
-tofu import keycloak_openid_client.flux_ui homelab/<client-uuid-from-keycloak-ui>
-tofu import keycloak_openid_client.grafana homelab/<client-uuid>
-# ... etc
-
-tofu plan   # should show no changes after all imports
-```
+> **The one hazard to watch:** if you point Terraform at resources the `KeycloakRealmImport` CR also declares, the two will thrash — Flux reconciles the CR, Terraform reverts it, forever. Pick one owner per resource and add a comment in both places recording the split.
 
 #### Verification
 
-- [ ] `tofu plan` shows no drift after import
-- [ ] Make a trivial change (e.g., update a redirect URI), `tofu apply`, verify in Keycloak UI
-- [ ] OIDC logins to all 4 apps still work after the apply
+- [ ] `tofu plan` is clean on a freshly-initialized state (or the Terraform environment was consciously skipped and that decision is recorded)
+- [ ] No resource is managed by both `KeycloakRealmImport` and Terraform — verified by reading both, and by applying each twice in sequence with no diff
+- [ ] Make a trivial change through whichever owner holds it (e.g. update a redirect URI), apply, verify in the Keycloak UI
+- [ ] OIDC logins to all platform clients still work after the apply
+- [ ] The ADR-009 claim contract still holds: a decoded token shows a flat `groups` array
 
 ---
 
@@ -638,7 +645,7 @@ path "transit/verify/cosign-harbor" { capabilities = ["create", "update"] }
 
 > **Status (v5.1):** these five are **deferred to post-Tier-5** (see the Tier 4 phase list and the Tier 4 gate — they do not block Tier 4 completion). What follows is the spec so the decisions are captured while fresh; it is not a build instruction for this pass. One dependency to watch: the ephemeral air-gap drill assumes a local **Forgejo** mirror, so either pull Forgejo forward out of this deferred set or use a throwaway in-package git server for the drill until it exists.
 
-Each follows the same pattern: Helm chart (proxied through Harbor) → values file in `apps/<name>/base/` → Kustomize overlay for prod (and dev if applicable) → Postgres via CloudNativePG where needed → ESO for any secrets → HTTPRoute via Cilium Gateway → OIDC client in Keycloak.
+Each follows the same pattern: Helm chart (proxied through Harbor) → values file in `apps/<name>/base/` → Kustomize overlay for prod (and dev if applicable) → Postgres via CloudNativePG where needed → ESO for any secrets → HTTPRoute via Cilium Gateway → OIDC client in Keycloak, **or oauth2-proxy forward-auth (Phase 3.14e) where the app has no usable native OIDC**. *(v5.3: "this app doesn't support SSO" is no longer an accepted answer — ADR-010.)*
 
 I'll keep these phases tight — the pattern is established.
 
@@ -647,14 +654,14 @@ I'll keep these phases tight — the pattern is established.
 - Single replica, Postgres via CNPG
 - Hostname: `vault-pwd.homelab-prod.homelab.internal` (avoid `vault.` conflict with the OpenBao cluster's DNS name)
 - Admin token in Vault KV, materialized via ESO
-- OIDC integration optional (Vaultwarden has limited SSO support; not worth wiring)
+- **SSO via oauth2-proxy forward-auth** (Phase 3.14e) rather than native OIDC — Vaultwarden's own SSO support is limited, but the login page should not be reachable without a Keycloak session. Note this is an authentication gate only; the vault master password still applies underneath. *(v5.3 — ADR-010; supersedes "not worth wiring")*
 - Daily Velero backup; restore drill documented
 
 #### 4.8 — n8n (prod-only on homelab-prod)
 
 - Helm chart from the [n8n community charts](https://github.com/8gears/n8n-helm-chart)
 - Postgres via CNPG, persistent storage for workflow data
-- OIDC via Keycloak (enterprise feature; on community version use header auth + a placeholder)
+- Native OIDC is an n8n enterprise feature. On the community edition, front it with **oauth2-proxy** (Phase 3.14e) and map `X-Auth-Request-Email` to n8n's header auth so you get real per-user identity rather than a shared gate. *(v5.3 — ADR-010)*
 - Useful early workflow: monitor Renovate PRs, auto-approve patches that pass Kyverno verification
 
 #### 4.9 — NetBox (prod-only on homelab-prod)
@@ -1017,7 +1024,7 @@ A handful of items were deferred during tier construction. Address now or docume
 - **Egress firewall enforcement for air-gap** (deferred from Tier 2 Phase 2.10) — add VyOS firewall rules blocking VLANs 50/60 from initiating connections to docker.io, quay.io, ghcr.io, gcr.io, registry.k8s.io. FQDN-based blocking in VyOS is fiddly; an alternative is to deploy an explicit Squid proxy on bgp-01/bgp-02 that only allows Harbor and Cloudflare DNS.
 - **Mobile root CA install** — install homelab root CA cert on your phone so mobile access to internal services doesn't warn about untrusted certificates.
 - **DNS sprawl threshold** — if you've crossed ~20 hostname entries on VyOS, time to deploy CoreDNS as a platform service.
-- **Keycloak realm declarative migration** — confirmed in Phase 4.4; verify drift-free state.
+- **Keycloak realm ownership boundary** — decided in Phase 4.4; verify no resource is double-managed by `KeycloakRealmImport` and Terraform. *(v5.3: the declarative migration itself moved to Phase 3.13c — ADR-010.)*
 
 ---
 
@@ -1027,7 +1034,8 @@ A handful of items were deferred during tier construction. Address now or docume
 
 - [ ] Flagger controller on homelab-prod and homelab-dev (HelmRelease Ready)
 - [ ] Per-environment Flux Kustomizations (dev/staging/prod) reconciling at least one app
-- [ ] Keycloak realm declaratively managed, `tofu plan` shows no drift
+- [ ] Keycloak realm declaratively managed with a single documented owner per resource; no double-management thrash
+- [ ] oauth2-proxy forward-auth working for at least one app that has no native OIDC *(v5.3 — ADR-010)*
 - [ ] CI pipeline produces signed, attested images in Harbor
 - [ ] Cosign verification works for signed images
 

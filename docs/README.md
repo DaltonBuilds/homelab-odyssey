@@ -6,8 +6,8 @@ This is the entry point for the build. Work through the tiers **sequentially** �
 
 ## Reference (read first / keep open)
 
-- [Overview](build/00-overview.md) — goals, v3→v5.2 changelog, architecture diagram, hardware inventory, Pre-Flight decisions
-- [Architecture Decision Records](build/01-adrs.md) — ADR-001 … ADR-008
+- [Overview](build/00-overview.md) — **Purpose & Mandate (the lab's two missions — read this first)**, v3→v5.3 changelog, architecture diagram, hardware inventory, Pre-Flight decisions
+- [Architecture Decision Records](build/01-adrs.md) — ADR-001 … ADR-010
 - [Network Reference](build/02-network-reference.md) — VLAN plan, BGP ASNs, IP allocation, LB pools
 
 ## Canonical build order
@@ -16,7 +16,7 @@ This is the entry point for the build. Work through the tiers **sequentially** �
 1. [Tier 0 · Foundation](build/tier-0-foundation.md) — Proxmox on all nodes, VLANs, VyOS BGP fabric, OpenBao HA + engines
 2. [Tier 1 · Platform Provisioning](build/tier-1-platform-provisioning.md) — OpenTofu/Ansible with Vault auth, storage tier, RKE2 (prod/dev) + Talos (mgmt)
 3. [Tier 2 · Platform Services](build/tier-2-platform-services.md) — Cilium BGP + DNS, ESO, cert-manager, Harbor, Flux, Zarf, Kyverno, supply chain
-4. [Tier 3 · Observability & Identity](build/tier-3-observability-identity.md) — metrics/logs/traces, Falco/Tetragon, Keycloak OIDC, OpenCost
+4. [Tier 3 · Observability & Identity](build/tier-3-observability-identity.md) — metrics/logs/traces, Falco/Tetragon, Keycloak OIDC (Operator + declarative realm) + oauth2-proxy, OpenCost
 5. [Tier 4 · Workloads & Delivery](build/tier-4-workloads-delivery.md) — Flagger, env promotion, ARC, k6/Chaos Mesh, Velero DR drill, app suite
 6. [Tier 5 · MLOps](build/tier-5-mlops.md) — *(separate document — pointer stub here)*
 

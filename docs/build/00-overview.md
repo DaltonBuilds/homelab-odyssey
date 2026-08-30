@@ -18,6 +18,8 @@ _(start)_  ·  [ADRs →](01-adrs.md)
 > - **Hardware inventory reconciled** to current reality: 2× NUC added as `pve-03`/`pve-04` (ephemeral capacity); the M920q workers and second M920x enumerated. *(v5.2 subsequently virtualizes the M920q/M920x #2 — see the Proxmox-on-every-node bullet below.)*
 > - **Proxmox on every physical node** *(v5.2 revision)*. The three M920q homelab-prod workers and M920x #2 no longer run bare-metal Ubuntu — **every physical machine runs Proxmox VE, and every Kubernetes node is an OpenTofu-provisioned VM.** M920x #2 is assigned as `pve-05`; the M920q trio become `pve-06`/`pve-07`/`pve-08`, each hosting one homelab-prod node VM. This deletes the last manual OS install (the old baremetal Phase 1.4), makes the whole fleet reproducible and snapshottable, and gives noVNC console access to every node. See ADR-008.
 > - **Project tracking bootstrapped on Huly** *(v5.2)*. A single Docker-Compose Huly VM is stood up right after Proxmox + the management VLAN (Tier 0 Phase 0.1–0.2) and **before** OpenBao — a deliberate second manual-provisioning exception (sibling to the Vault VMs) — so the whole build is tracked as Milestones/Epics/Stories from phase one. See [`../bootstrap/huly-bootstrap.md`](../bootstrap/huly-bootstrap.md) and the Tier 0 interstitial.
+> - **Identity tier re-litigated and retained** *(v5.3 revision)*. A proposal to replace Keycloak with **ZITADEL** was evaluated against both of the lab's missions and **rejected**; **authentik** was evaluated as the stronger challenger and also rejected, on governance longevity (Keycloak is CNCF/Apache 2.0; ZITADEL relicensed to AGPL-3.0 in 2025) and claim-shape portability. The ergonomic wins that motivated the challenge are recovered in place: **Keycloak Operator** instead of the now-unmaintained Bitnami chart, the realm **declarative from first apply** (deleting the old UI-bootstrap → `tofu import` dance), a capped JVM heap, and **oauth2-proxy** for forward-auth. A binding **identity portability contract** makes the decision cheap to revisit. See ADR-009 and ADR-010.
+> - **A "Purpose & Mandate" section added** *(v5.3)* — the lab serves two missions (near-term defense-skills ramp; permanent personal dojo) and only the first had ever been written down, which was silently biasing decisions. See below.
 > - **A new "Architecture Decision Records" section** captures the reasoning behind each change above.
 >
 > **What changed from v3:**
@@ -59,6 +61,25 @@ _(start)_  ·  [ADRs →](01-adrs.md)
 > - **pve-06 / pve-07 / pve-08** — 3× ThinkCentre M920q (16GB / 512GB each) *(v5.2 — were bare-metal Ubuntu)* — each hosts exactly one homelab-prod node VM (prod-cp-01, prod-w-01, prod-w-02)
 >
 > *(v5.2: the M920q trio and M920x #2 now run Proxmox VE rather than bare-metal Ubuntu — every Kubernetes node is a VM. See ADR-008.)*
+
+---
+
+## Purpose & Mandate *(v5.3)*
+
+This lab serves **two missions on different timelines**, and every technology choice should be scored against both. Naming them explicitly, because until v5.3 only the first was written down — which quietly biased several decisions.
+
+**Mission 1 — Ramp (now → ~18 months).** Close the gap between "Jr. DevOps Engineer" and "confident platform engineer at a space defense company." The lab is a rehearsal rig for the day job: DISA STIG, FIPS, Iron Bank, RKE2 CIS, air-gap delivery, Platform One patterns. This is why ADR-001, -005, -006, and -008 read the way they do.
+
+**Mission 2 — Dojo (permanent).** Once the baseline is established, this becomes the long-term home for personal infrastructure, exploration, and side ventures. Its users are me and a handful of friends; its lifetime is measured in years, not sprints. Requirements shift from "mirror DoD production" to "durable, low-toil, and pleasant to operate."
+
+**The day job stays on the defense path**, so Mission 1's skill investments do not expire — they compound. But Mission 2 outlives Mission 1, which means:
+
+- **Where the two missions agree, that's the strongest possible signal.** Zero-trust workload identity, supply-chain provenance, GitOps, and observability are all "top-notch defense practice" *and* "things I want running in ten years." Prioritize these.
+- **Where they diverge, name the trade in an ADR** rather than letting one mission silently win.
+- **Match the innovation budget to the blast radius of the layer.** Identity, secrets, and networking are foundational: everything depends on them, switching costs are high, and an outage locks you out of your own platform. There, prefer *boring and durably governed* — a CNCF or Linux Foundation project over a promising single-vendor one. Spend the appetite for novelty in layers where churn is cheap and reversible: delivery, observability, MLOps, ephemeral environments.
+- **Prefer reversibility over prediction.** Rather than trying to pick the tool that will still be correct in 2036, keep integration surfaces standards-only so the choice stays cheap to revisit. ADR-009 is the worked example of this principle.
+
+> **Reading guide:** where a phase exists primarily to rehearse a defense pattern with no long-term homelab payoff, it is tagged *(Mission 1)*. Everything untagged serves both.
 
 ---
 
@@ -124,7 +145,9 @@ Confirm alignment before starting:
 - [ ] **Policy:** Kyverno from Tier 2, audit mode initially, enforce after stabilization
 - [ ] **Observability:** Prometheus + Loki + Grafana + Tempo + Alertmanager on homelab-mgmt (HA)
 - [ ] **Runtime security:** Falco + Cilium Tetragon, events to homelab-mgmt Loki
-- [ ] **Identity:** Keycloak on homelab-mgmt; OIDC for Grafana, Vault UI, Harbor, and the Flux UI (Weave GitOps / Capacitor); break-glass admin retained on every integration. *(v5: ArgoCD OIDC removed)*
+- [ ] **Identity:** **Keycloak** on homelab-mgmt, deployed via the **Keycloak Operator** with the realm declarative from day one; OIDC for Grafana, Vault UI, Harbor, and the Flux UI (Weave GitOps / Capacitor); break-glass admin retained on every integration. *(v5: ArgoCD OIDC removed; v5.3: ZITADEL/authentik evaluated and rejected — ADR-009; Bitnami chart → Operator — ADR-010)*
+- [ ] **Identity portability contract** *(v5.3 — ADR-009)*: every integration consumes only standards-shaped claims (`sub`, `email`, `preferred_username`, and a **flat `groups` array of strings**). No IdP-proprietary claim shapes, no vendor SDKs. One documented issuer URL. This is what keeps the IdP choice reversible.
+- [ ] **Forward-auth:** **oauth2-proxy** in front of apps with no usable native OIDC support, brokering to Keycloak. *(v5.3 — ADR-010)*
 - [ ] **Delivery:** Flagger for canary releases, k6-operator + Chaos Mesh for load/chaos testing. *(v5: Argo Rollouts → Flagger)*
 - [ ] **Database:** CloudNativePG operator; dynamic credentials via Vault Database engine
 - [ ] **DR:** Velero to Garage S3, scheduled + tested restore procedures
