@@ -26,8 +26,8 @@
 - **3.10** — Sloth for SLO-driven alerts (platform SLOs defined)
 - **3.11** — CloudNativePG operator on homelab-mgmt (for Keycloak)
 - **3.12** — Kubernetes audit log immutable retention
-- **3.13** — Keycloak deployment + break-glass runbook
-- **3.14** — OIDC integrations: Flux UI, Grafana, Harbor, Vault UI
+- **3.13** — Keycloak deployment (Operator, declarative realm) + break-glass runbook
+- **3.14** — OIDC integrations: Flux UI, Grafana, Harbor, Vault UI + oauth2-proxy forward-auth
 - **3.15** — OpenCost — cost attribution and visibility
 - **3.16** — Tier 3 verification gate
 
@@ -1062,7 +1062,9 @@ The runbook walks through diagnosing whether it's a network issue, Alloy crash, 
 
 ### Phase 3.13: Keycloak Deployment
 
-**Goal:** Keycloak running on homelab-mgmt at `keycloak.mgmt.homelab.internal`, backed by CloudNativePG, with a `homelab` realm and clients pre-staged for the Flux UI, Grafana, Harbor, and Vault. **Break-glass admin retained on every integration.**
+**Goal:** Keycloak running on homelab-mgmt at `keycloak.mgmt.homelab.internal`, deployed via the **Keycloak Operator**, backed by CloudNativePG, with a **declaratively-defined** `homelab` realm and clients pre-staged for the Flux UI, Grafana, Harbor, Vault, and oauth2-proxy. **Break-glass admin retained on every integration.**
+
+> **Why Keycloak and not something lighter:** this was re-litigated in v5.3 against ZITADEL and authentik and Keycloak was retained — on governance longevity (CNCF/Apache 2.0), claim-shape portability, and non-expiring skill transfer, *not* on resource footprint. The ergonomic wins that motivated the challenge are folded into 3.13b/3.13c and 3.14e below. Read [ADR-009](01-adrs.md) and [ADR-010](01-adrs.md) before changing anything in this phase, and honor the **claim contract** described in 3.13c — it is what keeps the decision reversible.
 
 #### 3.13a — Postgres cluster for Keycloak
 
@@ -1085,61 +1087,103 @@ spec:
     retentionPolicy: "30d"
 ```
 
-#### 3.13b — Keycloak via Bitnami chart
+#### 3.13b — Keycloak via the Keycloak Operator *(v5.3 — ADR-010)*
+
+> **Why not the Bitnami chart:** earlier revisions of this doc pinned `bitnami/keycloak`. Bitnami's public catalog converted to `bitnamilegacy` on **2025-08-28** — those images get no further security updates without a Broadcom subscription, and the charts still reference them by default. The identity tier is the last place to run unpatched images. Use the upstream **Keycloak Operator**, which also gives us `KeycloakRealmImport` for 3.13c. Check whether an official Operator-based Helm chart has landed upstream by the time you build this (`keycloak/keycloak` discussion #42170); if so, prefer it over the raw Operator manifests.
+
+Install the Operator (version-pinned, images proxied through Harbor per the Tier 2 air-gap pivot), then:
 
 ```yaml
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
 metadata: { name: keycloak, namespace: keycloak }
 spec:
-  chart:
-    spec:
-      chart: keycloak
-      version: "22.x"
-      sourceRef: { kind: HelmRepository, name: bitnami }
-  values:
-    auth:
-      adminUser: admin
-      existingSecret: keycloak-admin-credentials   # ESO from Vault
-    replicaCount: 2
-    proxyHeaders: xforwarded
-    externalDatabase:
-      host: keycloak-postgres-rw.keycloak.svc
-      port: 5432
-      database: keycloak
-      existingSecret: keycloak-postgres-app
-      existingSecretUserKey: username
-      existingSecretPasswordKey: password
-    postgresql: { enabled: false }   # using CNPG, not bundled chart
-    ingress:
-      enabled: true
-      ingressClassName: cilium
-      hostname: keycloak.mgmt.homelab.internal
-      tls: true
-      extraTls:
-        - hosts: [keycloak.mgmt.homelab.internal]
-          secretName: mgmt-wildcard-tls
-    production: true
-    cache: { enabled: true }
+  instances: 1                       # v5.3: one replica — see note below
+  image: harbor.homelab-prod.homelab.internal/keycloak/keycloak:<pinned>
+  db:
+    vendor: postgres
+    host: keycloak-postgres-rw.keycloak.svc
+    port: 5432
+    database: keycloak
+    usernameSecret: { name: keycloak-postgres-app, key: username }
+    passwordSecret: { name: keycloak-postgres-app, key: password }
+  hostname:
+    hostname: keycloak.mgmt.homelab.internal
+  http:
+    httpEnabled: true                # TLS terminates at the Cilium Gateway
+  proxy:
+    headers: xforwarded
+  additionalOptions:
+    - name: features
+      value: "declarative-ui,passkeys"
+  unsupported:
+    podTemplate:
+      spec:
+        containers:
+          - env:
+              - name: JAVA_OPTS_APPEND
+                value: "-Xms256m -Xmx512m"   # v5.3: cap the heap (ADR-010)
 ```
 
-#### 3.13c — Realm + clients (Terraform via the Keycloak provider — or manual UI for v5 bootstrap)
+Route to it with an `HTTPRoute` on the mgmt Gateway — do **not** give this namespace its own copy of the wildcard TLS Secret (see the Phase 2.6b cross-namespace note and Appendix item 10).
 
-For Tier 3 bootstrap, use the UI. In Tier 4 we'll migrate realm config to declarative (`mrparkers/keycloak` Terraform provider running against the existing Keycloak):
+> **One replica, deliberately (ADR-010).** Two replicas requires distributed Infinispan cache with JGroups/DNS_PING discovery, which is a reliable source of homelab pain on Talos. For a single-operator lab, identity *simplicity* is worth more than identity HA: a restart is a brief total-SSO outage, and every integration already retains break-glass credentials (3.13d). Revisit if the lab gains real users who notice.
 
-1. Create realm `homelab`
-2. Create users: yourself, with email + initial password (will rotate after first login)
-3. Create clients:
-   - **`flux-ui`** — confidential, redirect URI `https://flux.homelab.internal/oauth2/callback`
-   - **`grafana`** — confidential, redirect URI `https://grafana.mgmt.homelab.internal/login/generic_oauth`
-   - **`harbor`** — confidential, redirect URI `https://harbor.homelab-prod.homelab.internal/c/oidc/callback`
-   - **`vault`** — confidential, redirect URI `https://vault.homelab.internal:8200/ui/vault/auth/oidc/oidc/callback` (and the CLI variant)
-4. For each client, capture the client secret and store in Vault:
+#### 3.13c — Realm + clients, declarative from first apply *(v5.3 — ADR-010)*
+
+> **Changed in v5.3:** earlier revisions built the realm by hand in the UI here, then reconciled it with `tofu import` and hand-copied client UUIDs in Phase 4.4. That dance is deleted. The realm is code from the first `kubectl apply`, which satisfies ADR-009's portability contract (rule 2) and removes the single ugliest step in the identity build.
+
+Commit a `KeycloakRealmImport` to `homelab-gitops/apps/keycloak/`:
+
+```yaml
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: KeycloakRealmImport
+metadata: { name: homelab, namespace: keycloak }
+spec:
+  keycloakCRName: keycloak
+  realm:
+    realm: homelab
+    enabled: true
+    displayName: Homelab
+    registrationAllowed: false
+    loginWithEmailAllowed: true
+    accessTokenLifespan: 1800          # 30m
+    ssoSessionIdleTimeout: 28800       # 8h
+    ssoSessionMaxLifespan: 86400       # 24h
+    groups:
+      - name: homelab-admin
+      - name: homelab-reader
+    clients:
+      - clientId: flux-ui
+        name: Flux UI
+        publicClient: false
+        standardFlowEnabled: true
+        redirectUris: ["https://flux.homelab.internal/oauth2/callback"]
+        # The claim contract (ADR-009 rule 1): flat `groups` array of strings.
+        protocolMappers:
+          - name: groups
+            protocol: openid-connect
+            protocolMapper: oidc-group-membership-mapper
+            config:
+              "claim.name": "groups"
+              "full.path": "false"
+              "id.token.claim": "true"
+              "access.token.claim": "true"
+              "userinfo.token.claim": "true"
+      # Repeat for grafana, harbor, vault, and oauth2-proxy (3.14e).
+```
+
+Then:
+
+1. **Client secrets.** Generate one per client, store in Vault, and let ESO materialize them into the consuming namespaces. Do **not** inline secrets in the realm manifest — it is a Git-tracked file.
    ```bash
-   bao kv put secret/mgmt/keycloak/flux-ui-oidc client-id="flux-ui" client-secret="..."
-   # etc for each
+   bao kv put secret/mgmt/keycloak/flux-ui-oidc client-id="flux-ui" client-secret="$(openssl rand -base64 32)"
+   # repeat per client; reference the same value in the realm manifest via a secret ref, not a literal
    ```
-5. Map realm roles to groups: `homelab-admin`, `homelab-reader`. Assign yourself to `homelab-admin`.
+2. **Your user.** Create it via the admin console or `kcadm` after first apply and assign it to `homelab-admin`. Users are deliberately *not* declarative — a realm manifest is not the right home for credentials, and there are only ever a handful of humans here.
+3. **Confirm idempotency.** Re-apply the manifest and verify the Operator reconciles without recreating clients (this is the property Phase 4.4 used to buy with `tofu import`).
+
+> **The claim contract is load-bearing.** Every client gets the flat-`groups` mapper above, and every consumer reads only `sub` / `email` / `preferred_username` / `groups`. This is what makes ADR-009 reversible — keep it and swapping IdPs later is a weekend's work. Do not let an app talk you into a proprietary claim shape.
 
 #### 3.13d — Break-glass runbook (commit to `homelab-gitops/docs/runbooks/keycloak-outage.md`)
 
@@ -1172,10 +1216,13 @@ Each integration retains a local admin account that bypasses OIDC:
 #### Verification
 
 - [ ] Keycloak UI reachable, login as admin works
-- [ ] Realm `homelab` exists with 4 clients configured
-- [ ] All 4 client secrets stored in Vault under `secret/mgmt/keycloak/*`
+- [ ] Realm `homelab` exists with 5 clients configured (flux-ui, grafana, harbor, vault, oauth2-proxy) — **created by the committed manifest, not by hand**
+- [ ] Re-applying the `KeycloakRealmImport` is idempotent: no client recreation, no lost secrets
+- [ ] All 5 client secrets stored in Vault under `secret/mgmt/keycloak/*`; none inlined in Git
+- [ ] A decoded ID token from any client shows `groups` as a **flat array of strings** (the ADR-009 claim contract)
 - [ ] Local-admin credentials for each integration target stored in `pass`
 - [ ] Runbook committed to gitops repo and readable
+- [ ] JVM heap cap confirmed in effect (`kubectl exec … -- jcmd 1 VM.flags | grep MaxHeapSize`) and pod RSS is under ~700MB at idle
 
 ---
 
@@ -1199,7 +1246,7 @@ oidc:
   redirectURL: https://flux.homelab.internal/oauth2/callback
 ```
 
-Create the `flux-ui` client in Keycloak (Phase 4.4 Terraform, or manually for bootstrap), store its secret in Vault, and let ESO materialize `flux-ui-oidc`. Break-glass stays the workstation kubeconfig + `flux`/`kubectl`.
+The `flux-ui` client is already declared in the Phase 3.13c realm manifest — no manual creation step. Store its secret in Vault and let ESO materialize `flux-ui-oidc`. Break-glass stays the workstation kubeconfig + `flux`/`kubectl`. *(v5.3: this used to say "or manually for bootstrap" — that path is gone; see ADR-010.)*
 
 #### 3.14b — Grafana
 
@@ -1265,9 +1312,47 @@ bao write auth/oidc/role/reader \
 
 > **Vault's root token stays for break-glass.** The root token never gets revoked. It's stored in `pass` under `homelab/vault/root-token-backup` and is the bypass if Keycloak is down AND you've locked yourself out of OIDC. Generate-root via recovery keys is the *deeper* break-glass; root token is the everyday one.
 
+#### 3.14e — oauth2-proxy: forward-auth for apps that don't speak OIDC *(v5.3 — ADR-010)*
+
+**Goal:** A generic authentication layer in front of applications with absent or paywalled native OIDC support, so "no SSO" stops being an acceptable answer anywhere on the platform.
+
+> **Why this exists.** Keycloak has no built-in forward-auth/proxy provider (this is authentik's one genuine advantage — see ADR-009). oauth2-proxy fills the gap with a boring, standards-based reverse proxy rather than a second IdP. It immediately upgrades the SSO story for Phase 4.7 (Vaultwarden) and 4.8 (n8n), where the spec previously said "not worth wiring."
+
+Deploy once per protected app (or once with per-route config), behind the Cilium Gateway:
+
+```yaml
+# homelab-gitops/apps/oauth2-proxy/base/values.yaml — excerpt
+config:
+  clientID: oauth2-proxy
+  existingSecret: oauth2-proxy-oidc        # ESO from Vault; holds client secret + cookie secret
+extraArgs:
+  provider: oidc
+  oidc-issuer-url: https://keycloak.mgmt.homelab.internal/realms/homelab
+  email-domain: "*"
+  scope: "openid email profile groups"
+  # Authorize on the SAME flat `groups` claim every other integration uses (ADR-009 rule 1)
+  oidc-groups-claim: groups
+  allowed-group: homelab-admin
+  upstream: http://<app-service>.<namespace>.svc:<port>
+  reverse-proxy: "true"                    # trust X-Forwarded-* from the Gateway
+  set-xauthrequest: "true"                 # pass identity downstream as headers
+  pass-access-token: "false"
+```
+
+Point the app's `HTTPRoute` at the oauth2-proxy Service rather than the app Service. For apps that can consume trusted headers (n8n, some others), map `X-Auth-Request-Email` / `X-Auth-Request-Preferred-Username` to their header-auth mechanism so you get real per-user identity rather than a shared gate. For apps that can't, oauth2-proxy is still a real access control boundary in front of an app that had none.
+
+**Cautions worth writing down:**
+- Forward-auth is an *authentication* gate, not authorization inside the app. Vaultwarden still has its own vault password; oauth2-proxy just means the login page isn't reachable without a Keycloak session.
+- Don't put oauth2-proxy in front of anything with its own OIDC support that works — double auth is toil, not defense in depth.
+- Don't put it in front of API/webhook endpoints that need to be machine-callable (Harbor's registry API, Forgejo's git-over-HTTPS). Scope the protected routes deliberately.
+- The `oauth2-proxy` Keycloak client is declared in the Phase 3.13c realm manifest like any other.
+
 #### Verification
 
 - [ ] Log into each UI via Keycloak (Flux UI, Grafana, Harbor, Vault UI)
+- [ ] oauth2-proxy gates a test app: unauthenticated request redirects to Keycloak; post-login request reaches the upstream
+- [ ] A user outside `homelab-admin` is rejected by `allowed-group`
+- [ ] Downstream app sees `X-Auth-Request-Email` populated with the real user
 - [ ] Group-based authorization works: removing yourself from `homelab-admin` in Keycloak demotes access to read-only on next login
 - [ ] Local-admin fallback works for each (test by deliberately failing OIDC — e.g., temporarily change client_secret to garbage, verify local-admin still works, restore)
 - [ ] Vault's CLI OIDC login flow works: `bao login -method=oidc role=admin` opens browser, returns token

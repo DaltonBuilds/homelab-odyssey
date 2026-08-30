@@ -120,11 +120,16 @@ Epics: [2.1] Cilium BGP + internal DNS · [2.2] Vault K8s auth · [2.3] External
 
 ## Milestone: Tier 3 — Observability & Identity *(skeleton)*
 
-Epics: [3.1] kube-prometheus-stack · [3.2] Loki · [3.3] Tempo · [3.4] Alloy on all clusters · [3.5] Alloy on substrate VMs · [3.6] Cross-cluster wiring verify · [3.7] Falco · [3.8] Tetragon export · [3.9] Alertmanager routing · [3.10] Sloth SLOs · [3.11] CloudNativePG on mgmt · [3.12] Audit-log immutable retention · [3.13] Keycloak · [3.14] OIDC integrations · [3.15] OpenCost · **[3.16] Tier 3 gate**.
+Epics: [3.1] kube-prometheus-stack · [3.2] Loki · [3.3] Tempo · [3.4] Alloy on all clusters · [3.5] Alloy on substrate VMs · [3.6] Cross-cluster wiring verify · [3.7] Falco · [3.8] Tetragon export · [3.9] Alertmanager routing · [3.10] Sloth SLOs · [3.11] CloudNativePG on mgmt · [3.12] Audit-log immutable retention · [3.13] Keycloak *(Operator + declarative realm — ADR-010)* · [3.14] OIDC integrations **+ oauth2-proxy forward-auth (3.14e)** · [3.15] OpenCost · **[3.16] Tier 3 gate**.
+
+> **Identity epics changed in v5.3 (ADR-009 / ADR-010).** When you explode Tier 3, note that [3.13] is no longer "install the Bitnami chart, click through the realm in the UI":
+> - **[3.13] Keycloak** — `identity`. Stories: CNPG Postgres cluster · **Keycloak Operator** install (pinned, image via Harbor) · `Keycloak` CR with capped JVM heap + `instances: 1` · **`KeycloakRealmImport` committed to Git** (realm, groups, 5 clients, flat-`groups` mapper) · client secrets → Vault → ESO (never inlined) · idempotency check on re-apply · break-glass runbook. Acceptance = the Phase 3.13 verification list, including the decoded-token claim-shape check.
+> - **[3.14] OIDC integrations** — `identity`. Stories: Flux UI · Grafana · Harbor · Vault UI · **[3.14e] oauth2-proxy forward-auth** (new) · group-demotion test · break-glass failure test per integration.
+> - Add a `Task` on [3.14]: **verify the ADR-009 portability contract** — no integration reads a non-standard claim, one documented issuer URL. This is a recurring check, not a one-off; re-run it whenever an app is added.
 
 ## Milestone: Tier 4 — Workloads & Delivery *(skeleton)*
 
-Epics: [4.1] Flagger · [4.2] Kustomize overlays + Flux Kustomizations · ~~[4.3] Argo Events~~ *(relocated to Tier 5 — ADR-003; do not create here)* · [4.4] Declarative Keycloak realm (Terraform) · [4.5] Custom OTel app (end-to-end) · [4.6] ARC · [4.7–4.11] Application suite — Vaultwarden/n8n/NetBox/Forgejo/Immich *(spec only; build post-Tier-5)* · [4.12] k6-operator · [4.13] Chaos Mesh + combined chaos/load · [4.14] Velero + DR drill · [4.15] Kyverno audit→enforce · [4.16] Carryover items · **[4.17] Tier 4 gate** · [4.18] Closing reflections.
+Epics: [4.1] Flagger · [4.2] Kustomize overlays + Flux Kustomizations · ~~[4.3] Argo Events~~ *(relocated to Tier 5 — ADR-003; do not create here)* · [4.4] Keycloak realm — declarative-model boundary *(rescoped v5.3 — ADR-010; the realm is already code from [3.13], so this epic is "decide CR-vs-Terraform ownership", **not** a UI→code migration, and the `tofu import` stories are gone)* · [4.5] Custom OTel app (end-to-end) · [4.6] ARC · [4.7–4.11] Application suite — Vaultwarden/n8n/NetBox/Forgejo/Immich *(spec only; build post-Tier-5)* · [4.12] k6-operator · [4.13] Chaos Mesh + combined chaos/load · [4.14] Velero + DR drill · [4.15] Kyverno audit→enforce · [4.16] Carryover items · **[4.17] Tier 4 gate** · [4.18] Closing reflections.
 
 ## Milestone: Tier 5 — MLOps *(skeleton — external doc)*
 
@@ -141,12 +146,14 @@ Not a milestone — a cross-cutting epic (tag onto Tier 2/4 once Flux + Zarf exi
 Time-boxed `Spike` items — schedule opportunistically, not gated:
 
 - **[Spike] OpenBao 2.7+ seal-plugin migration** — `openbao`, **required gate before any 2.7 upgrade** (not truly optional; link as a blocker on any OpenBao-upgrade epic).
+- **[Spike] SPIFFE/SPIRE workload identity** — `identity`, `security`. **Highest-priority spike on this list**; the only one advancing both missions at once. Gate on the Tier 3 gate being `Done`. Break into: SPIRE server + agent → one attested workload → **replace one long-lived AWS credential with SVID→OIDC federation** → SPIRE as an OpenBao JWT auth method. Estimate 4–6 half-days.
 - [Spike] OpenBao namespaces exploration
 - [Spike] OpenTofu state encryption
 - [Spike] Nix reproducible CI toolchain on ARC *(deferred by design)*
 - [Spike] vLLM serving runtime for KServe *(Tier 5-adjacent)*
 - [Spike] Papermill parameterized notebooks *(Tier 5-adjacent)*
 - [Spike] Backstage developer portal
+- [Spike] **IdP re-evaluation (authentik)** — `identity`. **Conditional — create the item but leave it `Backlog` with no estimate.** Only pull it forward if an ADR-009 trigger actually fires (day job leaves the defense path · Keycloak leaves CNCF or relicenses · oauth2-proxy toil outgrows a native proxy provider). First story is always "verify the portability contract held," which usually removes the urgency.
 
 ---
 

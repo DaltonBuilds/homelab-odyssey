@@ -45,6 +45,38 @@ Not part of v5 scope. Documented here so they don't get lost — and so the next
 
 **Effort:** 1–2 evenings. A `flake.nix` in the gitops repo's tooling dir; run `nix develop` inside an ARC job for the toolchain steps (or build the runner image itself with dockerTools); mirror the closure into a Garage-backed binary cache and prove a run with upstream caches blocked. Compare ergonomics against mise-in-CI as the baseline before committing either way.
 
+## SPIFFE / SPIRE — Workload Identity *(highest dual-mission value on this list)*
+
+**What it is:** A platform-wide identity plane for *workloads* rather than humans. SPIRE attests what a workload actually is (node + pod + service account) and issues it a short-lived SVID — an x509 cert or JWT — with no secret to distribute, rotate, or leak. Federated trust domains let a workload in one cluster authenticate to a service in another, or to a cloud API, without a static credential anywhere.
+
+**Why it's here, and why it's flagged.** ADR-009 rejected swapping the human IdP partly on the grounds that identity is the wrong layer to chase novelty in. That is only half an answer, and the other half belongs on this list: the genuine 2026 frontier in identity is not which SSO product you run, it's workload identity. Nothing in Tiers 0–5 addresses it — every machine-to-machine credential in this build is a Vault AppRole `secret_id`, a Kubernetes ServiceAccount token, or a long-lived cloud key.
+
+This is the rare item that scores maximum on **both** missions (see [Purpose & Mandate](00-overview.md#purpose--mandate-v53)):
+- **Mission 1:** workload identity and per-request attestation are the core of the DoD Zero Trust reference architecture. Directly job-relevant at a space defense company, and a far better conversation in a design review than "we run Keycloak."
+- **Mission 2:** eliminating static machine credentials is unambiguously the right long-term posture for personal infrastructure, and it gets *better* as the platform grows.
+
+**Why not in v5:** it wants a stable platform underneath it — SPIRE server needs HA storage, node attestation needs the node set to have stopped churning, and the payoff only shows up once there are enough services to have a credential-sprawl problem. Doing it before Tier 3 would mean debugging attestation and Cilium at the same time.
+
+**Trigger to revisit:** after the Tier 3 gate, when the first of these is true: (a) you're about to hand a workload a long-lived cloud credential and it makes you uncomfortable; (b) the Vault AppRole `secret_id` distribution problem starts feeling like toil; (c) Tier 5 multi-tenancy needs per-tenant workload identity, not just per-tenant namespaces.
+
+**Effort:** 2–3 evenings for a meaningful first slice. Suggested path, smallest useful step first:
+1. SPIRE server on homelab-mgmt (CNPG-backed datastore), SPIRE agent as a DaemonSet on homelab-prod. Register one workload, prove it gets an SVID.
+2. **The highest-value single win:** replace one long-lived AWS credential with OIDC federation — SPIRE-issued JWT SVID → AWS role assumption. No static key. This is the pattern worth internalizing, and it generalizes to GCP KMS (Phase 0.6) and any OIDC-trusting API.
+3. Wire SPIRE as an OpenBao auth method (JWT/OIDC) so workload identity replaces AppRole for in-cluster consumers, and note what it does *not* replace (the substrate VMs).
+4. Optional and genuinely advanced: mTLS between services via SPIFFE identities, and compare against what Cilium's transparent encryption already gives you — they overlap, and understanding *where* is the actual lesson.
+
+**Consciously out of scope:** replacing human SSO (that's Keycloak's job — ADR-009), and a full service mesh. SPIRE without a mesh is the useful 80%.
+
+## Re-evaluating the IdP — authentik *(conditional; do not do this speculatively)*
+
+**What it is:** The formal revisit hook for [ADR-009](01-adrs.md), recorded so a future decision is evidence-driven rather than a rerun of the same argument from memory.
+
+**Why it's here:** authentik was the strongest challenger to Keycloak — MIT-licensed, modern flow-builder UI, and the one real functional advantage of a **built-in forward-auth/proxy provider** plus an LDAP server for legacy apps. It lost on governance longevity (single-vendor vs. Keycloak's CNCF hosting) and non-expiring skill transfer, not on capability. ZITADEL lost more decisively and is not the fallback — if this ever flips, it flips to authentik.
+
+**Trigger to revisit** (any one, per ADR-009): the day job moves off the defense path so CAC/SAML-IdP/Big Bang parity stop mattering; Keycloak leaves CNCF or relicenses; or oauth2-proxy toil across enough apps outgrows what a native proxy provider would cost.
+
+**Before acting on it, verify the portability contract actually held** — that is the whole point of having written it down. Grep every integration for non-standard claim usage, confirm the realm is fully declarative, and confirm one issuer URL. If those three hold, budget a weekend. If they don't, the honest first step is fixing them, and doing that will probably remove the urgency.
+
 ## vLLM Serving Runtime for KServe
 
 **What it is:** A KServe-native serving runtime optimized for transformer-based language models. Implements paged attention and continuous batching — radically more efficient than naive HuggingFace transformers serving. The de facto LLM serving runtime as of 2026.
@@ -133,7 +165,9 @@ The output `result.ipynb` becomes a reproducible artifact — a paper trail of "
 
 ---
 
-The list ends here intentionally. The temptation in a homelab is always to add one more thing — every new CNCF project, every emerging pattern, every "interesting" demo. v5 plus Tier 5 plus these three is already substantially more platform than five users need. Build it, run it, learn what actually hurts, then revisit this list with real evidence.
+The list ends here intentionally. The temptation in a homelab is always to add one more thing — every new CNCF project, every emerging pattern, every "interesting" demo. v5 plus Tier 5 plus this list is already substantially more platform than five users need. Build it, run it, learn what actually hurts, then revisit this list with real evidence.
+
+> **Priority, if you only do one:** SPIFFE/SPIRE. It is the only item that advances both missions at once, and it addresses a real gap in the current design rather than adding a new surface. The IdP re-evaluation is the opposite — strictly conditional, and doing it speculatively would cost a weekend to arrive back where you started.
 
 ---
 
