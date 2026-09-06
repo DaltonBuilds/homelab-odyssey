@@ -8,8 +8,8 @@ This repository is the **design and build documentation** for that platform. The
 
 ## Architecture at a glance
 
-- **Hypervisors:** Proxmox VE on every physical node (no bare-metal Kubernetes — [ADR-008](docs/build/01-adrs.md)); each K8s node is an OpenTofu-provisioned VM.
-- **Clusters:** `homelab-prod` + `homelab-dev` on **RKE2** (CIS profile, encryption-at-rest, audit); `homelab-mgmt` on **Talos** (immutable, API-managed, no SSH).
+- **Hypervisors:** Proxmox VE on all **nine** physical nodes (no bare-metal Kubernetes — [ADR-008](docs/build/01-adrs.md)); each K8s node is an OpenTofu-provisioned VM. `pve-09` (Ryzen 9 7900X / 64GB / ZFS-mirrored NVMe / RTX 5070) is the GPU + amd64-build host, reassigned from workstation duty — [ADR-011](docs/build/01-adrs.md).
+- **Clusters:** `homelab-prod` + `homelab-dev` on **RKE2** (CIS profile, encryption-at-rest, audit); `homelab-mgmt` on **Talos** (immutable, API-managed, no SSH). Quorum nodes are spread so no single hypervisor loss breaks OpenBao Raft or mgmt etcd.
 - **Networking:** Cilium CNI + BGP control plane advertising LB IPs to redundant **VyOS** speakers (VRRP); Gateway API ingress.
 - **Secrets:** **OpenBao** HA (Raft + GCP KMS auto-unseal) — PKI, Transit, SSH OTP, Database, KV engines; every tool (OpenTofu, Ansible, ESO, cert-manager, cosign) authenticates to it.
 - **GitOps:** **Flux** on every cluster; **Flagger** for progressive delivery.
@@ -28,7 +28,7 @@ Start at the **[docs index](docs/README.md)**, which lays out the canonical buil
 | # | Document | What it covers |
 |---|----------|----------------|
 | — | [Overview](docs/build/00-overview.md) | Goals, changelog, topology, hardware inventory, locked-in decisions |
-| — | [ADRs](docs/build/01-adrs.md) | The *why* behind every major choice (001–008) |
+| — | [ADRs](docs/build/01-adrs.md) | The *why* behind every major choice (001–011) |
 | — | [Network Reference](docs/build/02-network-reference.md) | VLANs, BGP ASNs, IP allocation, LB pools |
 | 0 | [Tier 0 · Foundation](docs/build/tier-0-foundation.md) | Proxmox, VLANs, VyOS BGP, OpenBao HA |
 | 1 | [Tier 1 · Platform Provisioning](docs/build/tier-1-platform-provisioning.md) | OpenTofu + Ansible + Vault auth, storage, RKE2/Talos |

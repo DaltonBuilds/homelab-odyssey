@@ -107,7 +107,30 @@ spec:
         - "1"
 ```
 
-Pair with GPU-bearing nodes (homelab-prod node added later, or AWS burst cluster with `g5.xlarge`).
+**Where it runs *(updated v5.4)*.** The "GPU-bearing node added later" is no longer hypothetical — `prod-gpu-01` on pve-09 carries an RTX 5070 (12GB), joined to homelab-prod and tainted `nvidia.com/gpu=true:NoSchedule` (ADR-011). Two constraints shape what this spike can actually prove:
+
+- **12GB VRAM is the ceiling.** Comfortable for quantized 7B–14B serving and `--tensor-parallel-size 1`; not enough for unquantized larger models or meaningful tensor parallelism. The **AWS `g5.xlarge` burst path is deliberately retained** for anything above 12GB — do not delete it from the plan just because local GPU exists.
+- **No hardware isolation between tenants.** One consumer GPU means no vGPU and no MIG. Multi-tenant serving on this node is NVIDIA device-plugin time-slicing (`replicas: N`), which shares memory with no isolation — a single request with a large KV cache can OOM its neighbours. Fine for drills and single-tenant serving; if the friend/tenant scenario in the trigger above becomes real *concurrent* load, that is the signal for a second GPU or a `g5` burst, not more slicing.
+
+## NAS — Relocating the Storage Tier *(conditional; the storage SPOF is the real driver)*
+
+**What it is:** A dedicated NAS appliance or build, absorbing the bulk/cold storage tier that currently lives as VMs on pve-01.
+
+**Why it's here.** The [Network Reference](02-network-reference.md) failure-domain note closes with the one SPOF that v5.4 did *not* fix: `nfs-01` and `garage-01` both live on pve-01 and neither is replicated. With the quorum concentration resolved (ADR-011), this is now the **largest remaining single-host blast radius** in the platform — a pve-01 loss no longer breaks either quorum, but it still takes all persistent storage with it.
+
+**What a NAS does and does not change.** This was evaluated explicitly when choosing pve-09's pool layout, and the conclusion is worth recording so it isn't re-derived:
+
+- **Does change:** where bulk, cold, sequential data belongs — model-weight archives, datasets, Velero restore points, Garage object storage, NFS-backed PVCs. All of that is a better fit on a NAS than on hypervisor-local NVMe.
+- **Does *not* change:** anything latency-sensitive. VM boot disks, `mgmt-02`'s etcd WAL, CloudNativePG, Harbor's hot layers, and model weights being pulled into VRAM all want local NVMe (roughly 5–7GB/s and ~0.05ms, versus ~280MB/s and ~1ms over 2.5GbE). Those stay on pve-09 regardless.
+- Consequently a NAS **removes** capacity pressure from pve-09's mirror rather than arguing against it. The ZFS mirror decision in ADR-011 is unaffected by acquiring a NAS — what a NAS changes is *where `nfs-01` and Garage live*, which is the actual thing to revisit.
+
+**The capacity math makes this less optional than it first looked.** pve-09's mirror is **~900GB usable** (2× 1TB), and ADR-011's budget already commits most of it: ~50GB Proxmox, 60GB `mgmt-02`, ~200GB build VM, 250GB `prod-gpu-01`, leaving roughly 340GB shared between ZFS snapshots and the local model cache. So the two cheap mitigations below **compete with each other and with the model cache** for the same space — they are not free, and pve-09 is not a place to park a full storage tier. A NAS is what actually resolves this rather than shuffling it.
+
+**Trigger to revisit:** a NAS is acquired, or the pve-01 storage SPOF causes a real outage. Two independent smaller steps are available before then and are worth taking on their own merits, with the caveat above: (a) a **Garage replica on pve-09's mirror**, sized deliberately (a bounded bucket subset, not a full mirror of the object tier) — it makes the most important objects survive a pve-01 loss; (b) moving `nfs-01` to pve-09, which trades one SPOF for another but lands it on mirrored disks — attractive only if the dataset is small, which is exactly what a NAS would stop constraining.
+
+**Effort:** a scoped Garage replica is an evening. A full storage-tier relocation is 1–2 weekends including a Velero restore drill against the new target, and should not be attempted before the Tier 1 DR runbooks have been exercised once.
+
+**If you do buy one:** the thing that matters most for this platform is not raw capacity but **link speed and redundancy** — 2.5GbE or better (both switches are managed UniFi, so the uplink is the question), and a redundant pool. Note that pve-09's own NIC speed is a Phase 0.1 verification item for the same reason.
 
 ## Papermill for Parameterized Notebooks
 

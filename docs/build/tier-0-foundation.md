@@ -6,13 +6,13 @@
 
 ## Tier 0 — Foundation
 
-**Purpose:** Establish the substrate everything else depends on. By the end of Tier 0, you have all eight physical hypervisors online (pve-01/02 standing platform + dev, pve-03/04 ephemeral-capacity, pve-05 spare/quorum, pve-06/07/08 hosting the homelab-prod node VMs), a redundant BGP routing fabric, and a fully-configured OpenBao HA cluster with PKI, Transit, SSH OTP, and Database engines ready to issue credentials. **No Kubernetes exists yet.** Nothing in higher tiers can begin until Tier 0 verification passes.
+**Purpose:** Establish the substrate everything else depends on. By the end of Tier 0, you have all nine physical hypervisors online (pve-01/02 standing platform + dev, pve-03/04 ephemeral-capacity, pve-05 spare + vault-02 host, pve-06/07/08 hosting the homelab-prod node VMs, pve-09 GPU + build + mgmt-02 host), a redundant BGP routing fabric, and a fully-configured OpenBao HA cluster with PKI, Transit, SSH OTP, and Database engines ready to issue credentials. **No Kubernetes exists yet.** Nothing in higher tiers can begin until Tier 0 verification passes.
 
 **Why this tier exists separately:** v3 treated Vault as an application — Phase 6, after the cluster existed. That created a circular dependency (Ansible needed secrets to build the cluster; Vault lived in the cluster Ansible built). v4 inverts this: Vault is foundation, every later tier consumes it.
 
 ### Tier 0 Phases
 
-- **0.1** — Proxmox installation on all eight physical hypervisors
+- **0.1** — Proxmox installation on all nine physical hypervisors *(v5.4: pve-09 added)*
 - **0.2** — Switch / VLAN configuration verification
 - **0.3** — VyOS deployment and BGP fabric
 - **0.4** — Vault VM provisioning (bootstrap-mode, manual)
@@ -30,7 +30,7 @@
 
 ### Phase 0.1: Proxmox Installation (All Physical Hypervisors)
 
-**Goal:** Every physical machine running Proxmox VE, accessible from workstation, ready to host VMs. *(v5.2: this now includes the M920q trio and M920x #2, which formerly ran bare-metal Ubuntu — see ADR-008.)*
+**Goal:** Every physical machine running Proxmox VE, accessible from workstation, ready to host VMs. *(v5.2: this now includes the M920q trio and M920x #2, which formerly ran bare-metal Ubuntu — see ADR-008. v5.4: and pve-09, the former workstation tower — see ADR-011.)*
 
 #### pve-01 (existing M920 SFF, 64GB / 1TB)
 
@@ -66,7 +66,7 @@ These stay powered but idle until an ephemeral drill needs them. They are delibe
 
 #### pve-05 (M920x #2, 32GB / 1TB — spare + quorum) *(v5.2)*
 
-Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacity plus the recommended home for a redistributed quorum node (vault-02 and/or mgmt-02 — see the failure-domain note in Network Architecture).
+Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacity plus the home of the relocated **`vault-02`** *(v5.4: decided — `mgmt-02` went to pve-09 instead, so the two relocated quorum nodes sit on different hosts. See ADR-011 and the resolved failure-domain note in Network Architecture.)*
 
 - [ ] Install Proxmox VE on the 1TB SSD, ext4 root
 - [ ] Management IP `192.168.40.58`, gateway `192.168.40.1`; hostname `pve-05`; apt update + dist-upgrade
@@ -85,23 +85,60 @@ Each M920q hosts exactly **one** homelab-prod node VM (pve-06 → prod-cp-01, pv
 - [ ] Upload Ubuntu Server 24.04 cloud image to local storage on each
 - [ ] DHCP reservations on the edge router for all three
 
+#### pve-09 (Tower — Ryzen 9 7900X, 64GB / 2× 1TB NVMe / RTX 5070) *(v5.4)*
+
+The former home-office workstation, reassigned to the fleet (ADR-011). This is the fleet's only GPU host, only ZFS-root host, and the most capable single machine in the inventory. It carries three standing roles: `mgmt-02` (relocated quorum node), the amd64 build host, and — from Tier 5 — `prod-gpu-01`.
+
+**Pre-install (do these before flashing — order matters):**
+
+- [ ] Confirm nothing on the existing Fedora install is needed. *(Confirmed at planning time: nothing to rescue. Both NVMe sticks get wiped.)*
+- [ ] **Verify both NVMe sticks are the same model and capacity** — a ZFS mirror across mismatched sticks works but sizes to the smaller and inherits the slower one's write characteristics
+- [ ] **Verify both M.2 slots run at full lanes with the RTX 5070 populated.** On AM5, the second M.2 is often chipset-attached; a mirror across one CPU-attached and one chipset-attached slot is workable but caps mirror write throughput. Check the board manual's lane-sharing table — this is a "know it now" item, not a blocker
+- [ ] Enable **IOMMU / AMD-Vi** and **SVM** in UEFI; disable Secure Boot (or enroll keys) as required for the passthrough path
+- [ ] Note the onboard NIC's link speed (Ryzen 7000 boards commonly ship 2.5GbE). If it is 2.5GbE and the switch port is 1GbE, that ceiling matters later if a Garage replica or nfs-01 lands here
+
+**Install:**
+
+- [ ] Install Proxmox VE selecting **ZFS RAID1 (mirror)** across both 1TB NVMe sticks — **~900GB practically usable** after ZFS overhead. *(Deliberate exception to ADR-008's ext4-on-single-disk pattern; rationale and the full space budget are in ADR-011.)*
+- [ ] **Plan the space budget before provisioning VMs.** ~50GB Proxmox + 60GB `mgmt-02` + ~200GB build VM + 250GB `prod-gpu-01` leaves roughly 340GB for snapshots and the local model cache. This pool is adequate but not roomy — keep model weights on Garage/NFS with a bounded local cache, and size any future Garage replica here deliberately rather than assuming it's free
+- [ ] Management IP `192.168.40.66`, gateway `192.168.40.1`; hostname `pve-09`; apt update + dist-upgrade
+- [ ] **Cap the ARC:** write `options zfs zfs_arc_max=10737418240` (10GB) to `/etc/modprobe.d/zfs.conf`, then `update-initramfs -u` and reboot. 64GB shared between `mgmt-02`, a build VM, `prod-gpu-01`, and an uncapped ARC will otherwise get tight
+- [ ] Configure `vmbr0` to accept trunked VLANs **40 and 50** (40 for `mgmt-02` and management, 50 for `prod-gpu-01`)
+- [ ] Upload the Ubuntu Server 24.04 cloud image **and** the Talos `metal-amd64.iso` (this host runs both a Talos mgmt node and Ubuntu-based RKE2/build VMs)
+- [ ] DHCP reservation on the edge router
+
+**GPU passthrough prep** *(config only — no VM consumes the GPU until Tier 5):*
+
+- [ ] Add `amd_iommu=on iommu=pt` to the kernel cmdline; `update-grub`; reboot
+- [ ] Confirm the GPU sits in its own IOMMU group: `for d in /sys/kernel/iommu_groups/*/devices/*; do echo "$(basename $(dirname $(dirname $d))) $(basename $d)"; done | sort -n`
+- [ ] Blacklist the host drivers (`nouveau`, `nvidia`) and bind `vfio-pci` to the GPU's PCI IDs (both the VGA function and its HDMI audio function) via `/etc/modprobe.d/`
+- [ ] `lspci -nnk` shows `Kernel driver in use: vfio-pci` on the GPU after reboot
+- [ ] **Do not install NVIDIA drivers on the Proxmox host** — the driver belongs inside the guest that receives the passthrough
+
+> **Sequencing note.** Roles 1–2 (mgmt-02, build host) need only the install above. The GPU is *prepared* here and *consumed* in Tier 5. Deliberately do not make `prod-gpu-01` the first node you prove the RKE2 CIS profile on — GPU Operator driver container + `profile: cis` + SELinux enforcing on a fresh Blackwell driver branch is a known-friction stack, and you want the CIS profile already working on boring hardware (pve-06/07/08) before adding a new variable. See ADR-011.
+
 #### Verification
 
-- [ ] All eight Proxmox web UIs load from workstation
-- [ ] `ping` succeeds to every hypervisor management IP (`.50`, `.55`, `.56`, `.57`, `.58`, `.59`, `.64`, `.65` on VLAN 40)
+- [ ] All nine Proxmox web UIs load from workstation
+- [ ] `ping` succeeds to every hypervisor management IP (`.50`, `.55`, `.56`, `.57`, `.58`, `.59`, `.64`, `.65`, `.66` on VLAN 40)
 - [ ] Ubuntu 24.04 cloud image + VyOS/Talos ISOs visible in the relevant Proxmox storage pools
 - [ ] No clustering configured between any hosts (verify in each Datacenter view — each shows only itself)
+- [ ] `zpool status` on pve-09 shows a healthy 2-way mirror; `arc_summary` reflects the capped `zfs_arc_max` *(v5.4)*
+- [ ] `lspci -nnk` on pve-09 shows the RTX 5070 bound to `vfio-pci` *(v5.4)*
 
 ---
 
 ### Phase 0.2: Switch / VLAN Configuration
 
-**Goal:** Managed switch trunks all required VLANs to every Proxmox host and your workstation.
+**Goal:** The managed switches trunk all required VLANs to every Proxmox host and your workstation.
 
 This is the most boring and most critical phase. BGP, cluster separation, everything downstream assumes VLAN trunking is correct.
 
-- [ ] Identify your switch's port assignments for pve-01 through pve-08, the workstation, and the uplink to the edge router *(v5.2: six more hypervisor ports than the two-host layout — the M920q prod hosts pve-06/07/08 in particular must trunk VLAN 50)*
+> **Topology (v5.4):** two managed UniFi switches — an upstream switch feeding the home-office wall jacks, and an 8-port switch in the office. **pve-09 lands on its own office jack, not on the office switch**, so its trunk is configured on the upstream switch and must survive the inter-switch path. Getting this right on the office switch alone leaves pve-09 reachable on the native VLAN while silently missing 40/50 — which surfaces much later as a VM that never gets an address. Verify the jack, not just the switch port. Also sanity-check port count: nine hypervisors plus the workstation plus the edge uplink is eleven endpoints across the two switches.
+
+- [ ] Identify port assignments across **both** switches for pve-01 through pve-09, the workstation, and the uplink to the edge router *(v5.2: six more hypervisor ports than the two-host layout — the M920q prod hosts pve-06/07/08 in particular must trunk VLAN 50. v5.4: pve-09 added, on an office jack fed by the upstream switch.)*
 - [ ] Configure each hypervisor port as a trunk carrying VLANs 10, 40, 50, 60 (PVID 10 for workstation; tagged everywhere on hypervisor uplinks). Ephemeral hosts (pve-03/04) additionally carry VLAN 70.
+- [ ] Confirm the **inter-switch link** carries all four VLANs tagged — the office jacks are downstream of it *(v5.4)*
 - [ ] Create VLAN interfaces on the edge router for VLANs 50 and 60 (if not already present for 10/40)
 - [ ] Add temporary DHCP scopes on VLANs 50 and 60 (you'll replace with static cloud-init later; useful for first-boot testing)
 - [ ] Add static routes on edge router (these point at VyOS VRRP IP once it's up; for now, you can defer until Phase 0.3 is complete):
@@ -113,6 +150,7 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 
 - [ ] From a test VM on pve-01 tagged to VLAN 50, can reach the edge router and the internet
 - [ ] From a test VM on pve-02 tagged to VLAN 60, same
+- [ ] **From a test VM on pve-09 tagged to VLAN 50, same** — this is the one that proves the office-jack trunk, so do not skip it *(v5.4)*
 - [ ] Delete test VMs
 
 > **Blog note:** This phase rarely makes it into homelab writeups but is exactly the kind of L2 hygiene that breaks "production-grade" claims when skipped. Document your switch model and config — the next time you replace it, future-you will thank you.
@@ -236,8 +274,10 @@ For each (specs are identical):
 | VM         | Hypervisor | vCPU | RAM | Disk | IP             |
 | ---------- | ---------- | ---- | --- | ---- | -------------- |
 | vault-01   | pve-01  | 2    | 2GB | 20GB | 192.168.40.20  |
-| vault-02   | pve-01  | 2    | 2GB | 20GB | 192.168.40.21  |
+| vault-02   | **pve-05** *(v5.4: was pve-01)* | 2    | 2GB | 20GB | 192.168.40.21  |
 | vault-03   | pve-02  | 2    | 2GB | 20GB | 192.168.40.22  |
+
+> **One Raft node per hypervisor *(v5.4 — ADR-011)*.** `vault-02` moved off pve-01 so no single hypervisor hosts two of the three OpenBao nodes. Do not "simplify" this back onto pve-01 while hand-creating the VMs — the whole point of the Tier 1 single-host-loss drill is that this spread holds. `mgmt-02` moves to pve-09 in the same change.
 
 - [ ] Create each VM in Proxmox UI from Ubuntu 24.04 ISO
 - [ ] Configure cloud-init with hostname, static IP on VLAN 40, your SSH key, `dalton` user with sudo, password auth disabled
@@ -943,8 +983,8 @@ You may not advance to Tier 1 until **every** item below passes.
 
 #### Hypervisor & network
 
-- [ ] All eight Proxmox hosts operational, accessible from workstation, no clustering between any of them
-- [ ] Switch trunks VLANs 10, 40, 50, 60 to every hypervisor uplink (VLAN 50 reaches pve-06/07/08; VLAN 70 reaches pve-03/04)
+- [ ] All nine Proxmox hosts operational, accessible from workstation, no clustering between any of them *(v5.4: pve-09 included — plus a healthy ZFS mirror and the GPU bound to `vfio-pci`)*
+- [ ] Both switches trunk VLANs 10, 40, 50, 60 to every hypervisor uplink (VLAN 50 reaches pve-06/07/08 **and pve-09**; VLAN 70 reaches pve-03/04), and the inter-switch link carries all four tagged *(v5.4)*
 - [ ] `ping 192.168.40.1` from workstation succeeds (VRRP virtual IP responds)
 
 #### BGP fabric
