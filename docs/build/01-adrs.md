@@ -127,5 +127,56 @@ The evaluation was run twice, deliberately: once against **Mission 1** (defense 
 
 **Consequences.** Phase 3.13b is rewritten (Operator, not Bitnami chart). Phase 3.13c becomes a declarative realm manifest rather than UI clicks. **Phase 4.4 loses its `tofu import` step entirely** and narrows to "extend the realm-as-code and decide the Operator-CR vs. Terraform-provider boundary." The Terraform provider source is corrected from the deprecated `mrparkers/keycloak` to the community `keycloak/keycloak`. A new Phase 3.14e adds oauth2-proxy, which changes the SSO answer for Phases 4.7 (Vaultwarden) and 4.8 (n8n) from "skip" to "protected at the proxy." Client secrets continue to flow ESO → Vault as already specified. Cost accepted: single-replica identity means a restart is a brief total SSO outage — mitigated by the existing break-glass credentials on every integration, and preferable to debugging Infinispan split-brain at 11pm.
 
+### ADR-011 — The workstation tower is reassigned to the fleet as `pve-09`; the MacBook Pro becomes the sole workstation *(v5.4)*
+
+**Context.** A ninth physical machine existed outside the inventory this whole time: a tower (ASRock AM5 board, **Ryzen 9 7900X** 12c/24t, **64GB** RAM, **2× 2TB NVMe**, **GeForce RTX 5070** 12GB) historically treated as the home-office daily-driver workstation. It has run an untouched Fedora install for months — all v5 design work happened on the MacBook Pro (M2 Max).
+
+Three separate problems were pointing at it, and none of them had a good answer inside the eight-host inventory:
+
+1. **The build assumes exactly one workstation, and a second one violates a Tier 1 gate.** `pass` holds every kubeconfig and the Vault AppRole `secret_id`; the homelab root CA is installed to *the* workstation trust store (Phase 1.1); one cloud-init SSH public key is enrolled fleet-wide (Phase 1.3); `roles/kubeconfig-collector` copies kubeconfigs to *the* workstation (Phase 1.12); Vault SSH OTP is requested from there (Phase 1.6). Running two would mean two CA trust stores, two enrolled keypairs, two `pass` checkouts to keep in sync, and a second copy of the GPG private key — doubling the credential surface of a deliberately zero-trust design, and directly contradicting the Tier 1 gate item *"No long-lived credentials on workstation outside of `pass`."* There is also lived evidence: during the previous k3s-era lab, working across a Fedora tower and a laptop produced repeated unpushed-work drift, and the resolution then was the same as the resolution now — consolidate on the laptop.
+2. **No GPU exists anywhere in the fleet.** Tier 5 MLOps, KServe, and the vLLM spike in [Future Upgrades](future-upgrades.md) all assume GPU capacity, and that document's answer was *"pair with GPU-bearing nodes (homelab-prod node added later, or AWS burst cluster with `g5.xlarge`)"* — i.e. the plan's answer to its own ML tier was to rent it later.
+3. **The whole fleet is amd64 and the workstation is arm64.** `zarf package create`, container builds, and any Iron Bank / STIG artifact prep are cross-architecture from an M2 Max, which means emulated `buildx` — slow, and occasionally subtly wrong. Phase 4.6 (ARC runners) is the correct answer, but the largest available runner host was a 16GB M920q.
+
+**Decision.** **The tower joins the fleet as `pve-09` and the MacBook Pro becomes the sole workstation.** No Fedora workstation VM is retained — the clean break is deliberate. `pve-09` takes four roles, sequenced rather than stood up at once:
+
+| Priority | Role | Introduced |
+| --- | --- | --- |
+| 1 | **Quorum redistribution** — hosts `mgmt-02`, paired with `vault-02` → `pve-05` | Tier 1 (decided now) |
+| 2 | **amd64 build host** — ARC runners, `zarf package create`, image builds | Tier 2 / Tier 4 |
+| 3 | **GPU worker** — `prod-gpu-01`, joined to homelab-prod, tainted and labeled as a resource-type node pool | Tier 5 |
+| 4 | **Storage SPOF mitigation** — Garage replica or a future home for `nfs-01` | Opportunistic |
+
+Storage on `pve-09` is a **ZFS mirror** across both 2TB sticks (2TB usable), which makes it the **first ZFS-root Proxmox host in the fleet** — every other host is ext4-on-single-disk per ADR-008.
+
+**Rationale.**
+
+*1. Reason (1) alone decides it.* Even with no GPU and no ML tier, collapsing to one workstation is the right call, because the alternative is a documented gate violation for the sake of a machine that hadn't been logged into in months. The GPU is a bonus on top of a decision that was already correct.
+
+*2. It converts a rented dependency into an owned one.* Role 3 deletes the `g5.xlarge` line item from the critical path and gives Tier 5 a real node pool by resource type — taint the node, `tolerations`/`nodeSelector` on ML workloads, and the `mlops-*` namespaces schedule there naturally. Joining it to homelab-prod rather than standing up a fourth cluster is the low-friction choice: Harbor and Tier 5 already live there.
+
+*3. It closes the worst-documented weakness in the design, twice.* The failure-domain warning in [Network Reference](02-network-reference.md) flags `pve-01` hosting two of three Vault nodes *and* two of three mgmt nodes, plus `nfs-01`, `garage-01`, `bgp-01`, and `prod-w-03` — and separately flags unreplicated storage as a SPOF to "accept deliberately." `pve-09` is the best redistribution target in the fleet (64GB, modern CPU, mirrored NVMe). Splitting the two quorum nodes across *two different* new hosts — `vault-02` → `pve-05`, `mgmt-02` → `pve-09` — is strictly better than the doc's Option 1, which put both on `pve-05` and merely moved the correlated-failure problem.
+
+*4. It scores on both missions, which per [Purpose & Mandate](00-overview.md#purpose--mandate-v53) is the strongest available signal.* Mission 1 gets a native amd64 build/CI host and real headroom for STIG/FIPS break-rebuild loops. Mission 2 gets local GPU for the dojo and a decade of compute headroom. Neither mission has to concede anything.
+
+*5. ZFS mirror over stripe or split, despite the capacity cost.* The mirror is not buying bulk capacity — it is buying VM-disk resilience and a fast local snapshot surface on the one box that will host a quorum node *and* absorb risky GPU-driver and STIG changes. A degraded mirror keeps running and the stick gets replaced at leisure; a dead stripe is a rebuild. The capacity argument was also checked against the future-NAS question and **survives it**: a NAS absorbs bulk cold data (model archives, datasets, Velero targets, Garage objects, NFS-backed PVCs) but cannot serve VM boot disks, `mgmt-02`'s etcd WAL, or CNPG at NVMe latency. A NAS therefore *removes* the capacity pressure against mirroring rather than adding to it. Sizing check: Proxmox plus VM disks lands near 500GB, leaving comfortable room for a local model cache and image/layer cache inside 2TB.
+
+**Consequences.**
+
+- **Inventory grows to nine hypervisors.** `pve-09` at `192.168.40.66` on VLAN 40, trunking VLANs 40 and 50 (it hosts a prod-tier VM). Phase 0.1 gains a `pve-09` subsection; Phase 0.2's port/trunk list, the Tier 0 purpose statement, and every "all eight" verification bullet become nine.
+- **The quorum layout is now decided, not deferred.** `vault-02` → `pve-05` and `mgmt-02` → `pve-09`. The Location cells in the IP allocation table are updated, and the failure-domain warning is rewritten from "needs your decision" to a resolved note. The Phase 1.3d "HA topology choice" note is replaced — mgmt is no longer 2-on-`pve-01`, so the asymmetric-availability reasoning it documented no longer applies.
+- **`prod-gpu-01` is added to homelab-prod** at `192.168.50.34`, taking the cluster from 4 nodes to 5. Tier 1's verification gate changes from "4 nodes Ready" to "5 nodes Ready." The node is provisioned in Phase 1.3 like every other VM but joins with a taint so nothing schedules there by accident.
+- **ADR-008's "ext4 root, no ZFS" pattern gains a documented exception.** `zfs_arc_max` must be explicitly capped on `pve-09` (~8–12GB); 64GB shared between a GPU node VM, a build VM, `mgmt-02`, and an uncapped ARC would otherwise get tight.
+- **The vLLM spike's "GPU-bearing nodes added later" line is satisfied**, but the `g5.xlarge` burst path is deliberately **retained** as the escape hatch for anything exceeding 12GB VRAM.
+- **Accepted costs, stated plainly:**
+  - **One consumer GPU = one VM.** No vGPU (NVIDIA licenses it for datacenter cards only) and no MIG (A100/H100+). The "GPU node pool" is exactly one node. Sharing across pods is possible via the NVIDIA device plugin's time-slicing (`replicas: N`), which provides **no memory isolation and no fault isolation** — one greedy pod can OOM its neighbors. Fine for a lab; do not build a multi-tenant GPU SLO on it.
+  - **12GB VRAM is an inference/small-fine-tune ceiling**, not a training rig: quantized 7B–14B serving, LoRA fine-tunes, and KServe/vLLM drills, yes; 24GB+ workloads still go to AWS.
+  - **Blackwell (GB205) is new silicon.** GPU Operator driver container + RKE2 `profile: cis` + SELinux enforcing is a known-friction stack on a fresh driver branch. `prod-gpu-01` must **not** be the first node the CIS profile is proven on — get the profile working on the M920q nodes first.
+  - **Power and noise** are materially higher than a ThinkCentre (idle roughly 70–100W vs ~15W, spiking past 400W under GPU load). Explicitly accepted: the box runs 24/7 in the home office and this was judged acceptable.
+  - **Single-homed workstation.** With the clean break, the MacBook Pro is the only machine holding the GPG key for `pass`, break-glass credentials, and GCP KMS access. Loss of the laptop means a period of no platform access. Explicitly accepted as a buy-a-new-laptop event rather than mitigated with a second trusted endpoint — which is the whole point of reason (1).
+  - **Bare-metal Linux on a desk** is gone as a rehearsal surface, but ADR-008 already traded that away fleet-wide. No new loss.
+- **Reversibility is high and worth stating:** nothing here is a one-way door. Reinstalling a desktop OS on `pve-09` is an afternoon, and Proxmox even preserves the option of a GPU-passthrough desktop VM if the clean break is ever regretted.
+
+**Trigger to revisit.** (a) **A NAS is acquired** — revisit *where `nfs-01` and Garage live*, not the pool layout (see [Future Upgrades](future-upgrades.md)); (b) GPU contention becomes real, meaning time-slicing's lack of isolation actually bites, at which point the honest answer is a second GPU or datacenter-class hardware, not more slicing; (c) a workload needs >12GB VRAM, which is the `g5.xlarge` path, not a rebuild; (d) `pve-09` power draw stops being acceptable, in which case roles 2–3 become cordon/Wake-on-LAN-gated rather than standing, the way `pve-03`/`pve-04` already are.
+
 ---
 

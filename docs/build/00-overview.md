@@ -20,6 +20,8 @@ _(start)_  ·  [ADRs →](01-adrs.md)
 > - **Project tracking bootstrapped on Huly** *(v5.2)*. A single Docker-Compose Huly VM is stood up right after Proxmox + the management VLAN (Tier 0 Phase 0.1–0.2) and **before** OpenBao — a deliberate second manual-provisioning exception (sibling to the Vault VMs) — so the whole build is tracked as Milestones/Epics/Stories from phase one. See [`../bootstrap/huly-bootstrap.md`](../bootstrap/huly-bootstrap.md) and the Tier 0 interstitial.
 > - **Identity tier re-litigated and retained** *(v5.3 revision)*. A proposal to replace Keycloak with **ZITADEL** was evaluated against both of the lab's missions and **rejected**; **authentik** was evaluated as the stronger challenger and also rejected, on governance longevity (Keycloak is CNCF/Apache 2.0; ZITADEL relicensed to AGPL-3.0 in 2025) and claim-shape portability. The ergonomic wins that motivated the challenge are recovered in place: **Keycloak Operator** instead of the now-unmaintained Bitnami chart, the realm **declarative from first apply** (deleting the old UI-bootstrap → `tofu import` dance), a capped JVM heap, and **oauth2-proxy** for forward-auth. A binding **identity portability contract** makes the decision cheap to revisit. See ADR-009 and ADR-010.
 > - **A "Purpose & Mandate" section added** *(v5.3)* — the lab serves two missions (near-term defense-skills ramp; permanent personal dojo) and only the first had ever been written down, which was silently biasing decisions. See below.
+> - **The workstation tower joins the fleet as `pve-09`; the MacBook Pro becomes the sole workstation** *(v5.4 revision)*. A ninth machine (Ryzen 9 7900X / 64GB / 2× 2TB NVMe / **RTX 5070**) that had been sitting idle as a home-office daily driver is reassigned to the lab. This does four things at once: collapses the build to the **one** workstation its credential design always assumed, puts the **first GPU** in the fleet (deleting the "rent a `g5.xlarge` later" placeholder from Tier 5 and the vLLM spike), gives the fleet a native **amd64 build host** for ARC/Zarf work that would otherwise be emulated on an arm64 laptop, and **resolves the `pve-01` quorum concentration** that has been flagged as "needs your decision" since v5.1. See ADR-011.
+> - **The quorum layout is now decided** *(v5.4)*: `vault-02` → `pve-05` and `mgmt-02` → `pve-09` — split across two *different* new hosts, so no single hypervisor loss can break either quorum. The failure-domain warning in the Network Reference is resolved rather than deferred.
 > - **A new "Architecture Decision Records" section** captures the reasoning behind each change above.
 >
 > **What changed from v3:**
@@ -45,22 +47,24 @@ _(start)_  ·  [ADRs →](01-adrs.md)
 > **Project tracking:** Huly (bootstrap VM → later migrated to `homelab-mgmt`) — see [`../bootstrap/huly-bootstrap.md`](../bootstrap/huly-bootstrap.md) and [`../../huly/work-breakdown.md`](../../huly/work-breakdown.md).
 >
 > **Cluster & host naming:**
-> - **homelab-prod** (prod) — prod-cp-01 (CP), prod-w-01 (W1), prod-w-02 (W2), prod-w-03 (W3 — VM)
+> - **homelab-prod** (prod) — prod-cp-01 (CP), prod-w-01 (W1), prod-w-02 (W2), prod-w-03 (W3 — VM), **prod-gpu-01** (GPU worker, tainted — VM on pve-09) *(v5.4)*
 > - **homelab-dev** (dev/staging) — dev-cp-01 (CP), dev-w-01 (W1), dev-w-02 (W2) — all VMs on the new M920x
-> - **homelab-mgmt** — 3-node HA **Talos** cluster: mgmt-01, mgmt-02, mgmt-03 (VMs; API-managed via `talosctl`, no SSH)
-> - **Vault HA** — vault-01, vault-02, vault-03 (dedicated VMs running **OpenBao**, outside Kubernetes; hostnames keep `vault-*` naming — ADR-006)
+> - **homelab-mgmt** — 3-node HA **Talos** cluster: mgmt-01, mgmt-02, mgmt-03 (VMs; API-managed via `talosctl`, no SSH). *(v5.4: mgmt-02 relocated pve-01 → pve-09.)*
+> - **Vault HA** — vault-01, vault-02, vault-03 (dedicated VMs running **OpenBao**, outside Kubernetes; hostnames keep `vault-*` naming — ADR-006). *(v5.4: vault-02 relocated pve-01 → pve-05.)*
 > - **BGP routers** — bgp-01, bgp-02 (VyOS VMs, one per hypervisor)
 > - **Storage** — nfs-01 (VM), garage-01 (LXC container)
 > - **Ephemeral** — `eph-<purpose>-<n>` (disposable Talos clusters, OpenTofu-provisioned on pve-03/pve-04, no standing footprint)
 >
-> **Hypervisor inventory (v5.2 — Proxmox on every physical node):**
+> **Hypervisor inventory (v5.4 — Proxmox on every physical node, nine hosts):**
 > - **pve-01** — ThinkCentre M920 SFF (64GB / 1TB) — platform-adjacent (mgmt + prod-adjacent VMs)
 > - **pve-02** — ThinkCentre M920x #1 (32GB / 1TB) — dev/staging
 > - **pve-03 / pve-04** — 2× NUC *(v5)* — ephemeral-env capacity (normally idle)
-> - **pve-05** — ThinkCentre M920x #2 (32GB / 1TB) *(v5.2 — role assigned)* — spare capacity + quorum redistribution target (see the single-hypervisor-failure note below)
+> - **pve-05** — ThinkCentre M920x #2 (32GB / 1TB) *(v5.2 — role assigned)* — spare capacity; hosts the relocated **vault-02** *(v5.4)*
 > - **pve-06 / pve-07 / pve-08** — 3× ThinkCentre M920q (16GB / 512GB each) *(v5.2 — were bare-metal Ubuntu)* — each hosts exactly one homelab-prod node VM (prod-cp-01, prod-w-01, prod-w-02)
+> - **pve-09** — Tower: ASRock AM5 / **Ryzen 9 7900X** (12c/24t) / **64GB** / **2× 2TB NVMe (ZFS mirror)** / **GeForce RTX 5070 12GB** *(v5.4 — was the home-office workstation)* — the fleet's GPU host (`prod-gpu-01`), native amd64 build host for ARC/Zarf, and home of the relocated **mgmt-02**. See ADR-011.
 >
 > *(v5.2: the M920q trio and M920x #2 now run Proxmox VE rather than bare-metal Ubuntu — every Kubernetes node is a VM. See ADR-008.)*
+> *(v5.4: pve-09 is the only ZFS-root host in the fleet — a documented exception to ADR-008's ext4 pattern, with `zfs_arc_max` capped. It is also the only host with a GPU, and one consumer GPU passes through to exactly one VM: no vGPU, no MIG. See ADR-011.)*
 
 ---
 
@@ -102,7 +106,7 @@ This lab serves **two missions on different timelines**, and every technology ch
    ┌────────┴────────┐ ┌───────┴────────┐    ┌─────────┴────────┐ ┌───────┴────────┐
    │  homelab-prod   │ │  homelab-dev   │    │   homelab-mgmt   │ │ vault-01/02/03 │
    │   (prod RKE2)   │ │ (dev/stg RKE2) │    │  (3-node Talos)  │ │  (OpenBao HA)  │
-   │  4 VMs, M920q+  │ │  3 VMs, M920x  │    │  Obs + Keycloak  │ │ Raft + GCP KMS │
+   │ 5 VMs, +GPU node│ │  3 VMs, M920x  │    │  Obs + Keycloak  │ │ Raft + GCP KMS │
    └─────────────────┘ └────────────────┘    └──────────────────┘ └────────────────┘
             │                  │                       │                  │
             └──────────────────┴───────────┬───────────┴──────────────────┘
@@ -116,6 +120,8 @@ This lab serves **two missions on different timelines**, and every technology ch
 > **v5 topology notes:** `homelab-mgmt` runs **Talos** (immutable, API-managed); workload clusters stay **RKE2**. **Flux** reconciles all three from `homelab-gitops` (no ArgoCD). Disposable **ephemeral Talos clusters** spin up on pve-03/pve-04 on demand (OpenTofu + Flux + Zarf) and are not shown above because they have no standing footprint. **Flagger** handles progressive delivery on the workload clusters.
 >
 > **v5.2 note:** every physical box now runs Proxmox — the homelab-prod nodes shown as "4 VMs" are OpenTofu-provisioned VMs (one per M920q on pve-06/07/08, plus prod-w-03 on pve-01), not bare metal. See ADR-008.
+>
+> **v5.4 note:** homelab-prod is now **5 VMs** — `prod-gpu-01` on pve-09 joins as a tainted GPU worker, making Tier 5's node pool real rather than rented. pve-09 also hosts `mgmt-02` (relocated off pve-01) and the amd64 build host. See ADR-011.
 
 ---
 
@@ -123,7 +129,9 @@ This lab serves **two missions on different timelines**, and every technology ch
 
 Confirm alignment before starting:
 
-- [ ] **Hypervisors:** every physical box runs Proxmox VE — pve-01 (M920 SFF, 64GB/1TB) + pve-02 (M920x #1, 32GB/1TB) + pve-03/pve-04 (2× NUC, ephemeral capacity) + pve-05 (M920x #2, 32GB/1TB) + pve-06/pve-07/pve-08 (3× M920q, 16GB/512GB, one homelab-prod node VM each). No clustering between any of them (clean failure boundary). *(v5.2: M920q + M920x #2 moved from bare-metal Ubuntu to Proxmox — every K8s node is now a VM. See ADR-008.)*
+- [ ] **Hypervisors:** every physical box runs Proxmox VE — pve-01 (M920 SFF, 64GB/1TB) + pve-02 (M920x #1, 32GB/1TB) + pve-03/pve-04 (2× NUC, ephemeral capacity) + pve-05 (M920x #2, 32GB/1TB) + pve-06/pve-07/pve-08 (3× M920q, 16GB/512GB, one homelab-prod node VM each) + **pve-09 (tower: Ryzen 9 7900X, 64GB, 2× 2TB NVMe ZFS mirror, RTX 5070)**. No clustering between any of them (clean failure boundary). *(v5.2: M920q + M920x #2 moved from bare-metal Ubuntu to Proxmox — every K8s node is now a VM. See ADR-008. v5.4: pve-09 added — see ADR-011.)*
+- [ ] **Single workstation:** the MacBook Pro (M2 Max, arm64) is the *only* workstation. The former Fedora tower is now pve-09; no workstation VM is retained on it. This is load-bearing — `pass`, the root CA trust store, the fleet-wide cloud-init SSH key, and Vault SSH OTP all assume exactly one trusted endpoint. *(v5.4 — ADR-011)*
+- [ ] **GPU capacity:** one RTX 5070 on pve-09, passed through to a single VM (`prod-gpu-01`, tainted, joined to homelab-prod). No vGPU, no MIG — in-cluster sharing is device-plugin time-slicing only, with no memory or fault isolation. 12GB VRAM ceiling; >12GB workloads still burst to AWS `g5.xlarge`. *(v5.4 — ADR-011)*
 - [ ] **CNI:** Cilium on both workload clusters, BGP control plane enabled, kube-proxy replacement, Gateway API
 - [ ] **K8s distribution (workloads):** RKE2 with `profile: cis`, secrets encryption-at-rest, audit policy enabled (homelab-prod, homelab-dev)
 - [ ] **K8s distribution (management):** **Talos Linux** — immutable, API-managed (no SSH/shell/package manager), 3-node HA (homelab-mgmt). *(v5 change — ADR-001)*
