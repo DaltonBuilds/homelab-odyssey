@@ -66,7 +66,7 @@ These stay powered but idle until an ephemeral drill needs them. They are delibe
 
 #### pve-05 (M920x #2, 32GB / 1TB — spare + quorum) *(v5.2)*
 
-Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacity plus the recommended home for a redistributed quorum node (vault-02 and/or mgmt-02 — see the failure-domain note in Network Architecture).
+Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacity plus the home of the relocated **`vault-02`** *(v5.4: decided — `mgmt-02` went to pve-09 instead, so the two relocated quorum nodes sit on different hosts. See ADR-011 and the resolved failure-domain note in Network Architecture.)*
 
 - [ ] Install Proxmox VE on the 1TB SSD, ext4 root
 - [ ] Management IP `192.168.40.58`, gateway `192.168.40.1`; hostname `pve-05`; apt update + dist-upgrade
@@ -85,7 +85,7 @@ Each M920q hosts exactly **one** homelab-prod node VM (pve-06 → prod-cp-01, pv
 - [ ] Upload Ubuntu Server 24.04 cloud image to local storage on each
 - [ ] DHCP reservations on the edge router for all three
 
-#### pve-09 (Tower — Ryzen 9 7900X, 64GB / 2× 2TB NVMe / RTX 5070) *(v5.4)*
+#### pve-09 (Tower — Ryzen 9 7900X, 64GB / 2× 1TB NVMe / RTX 5070) *(v5.4)*
 
 The former home-office workstation, reassigned to the fleet (ADR-011). This is the fleet's only GPU host, only ZFS-root host, and the most capable single machine in the inventory. It carries three standing roles: `mgmt-02` (relocated quorum node), the amd64 build host, and — from Tier 5 — `prod-gpu-01`.
 
@@ -99,7 +99,8 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 **Install:**
 
-- [ ] Install Proxmox VE selecting **ZFS RAID1 (mirror)** across both 2TB NVMe sticks — 2TB usable. *(Deliberate exception to ADR-008's ext4-on-single-disk pattern; rationale in ADR-011.)*
+- [ ] Install Proxmox VE selecting **ZFS RAID1 (mirror)** across both 1TB NVMe sticks — **~900GB practically usable** after ZFS overhead. *(Deliberate exception to ADR-008's ext4-on-single-disk pattern; rationale and the full space budget are in ADR-011.)*
+- [ ] **Plan the space budget before provisioning VMs.** ~50GB Proxmox + 60GB `mgmt-02` + ~200GB build VM + 250GB `prod-gpu-01` leaves roughly 340GB for snapshots and the local model cache. This pool is adequate but not roomy — keep model weights on Garage/NFS with a bounded local cache, and size any future Garage replica here deliberately rather than assuming it's free
 - [ ] Management IP `192.168.40.66`, gateway `192.168.40.1`; hostname `pve-09`; apt update + dist-upgrade
 - [ ] **Cap the ARC:** write `options zfs zfs_arc_max=10737418240` (10GB) to `/etc/modprobe.d/zfs.conf`, then `update-initramfs -u` and reboot. 64GB shared between `mgmt-02`, a build VM, `prod-gpu-01`, and an uncapped ARC will otherwise get tight
 - [ ] Configure `vmbr0` to accept trunked VLANs **40 and 50** (40 for `mgmt-02` and management, 50 for `prod-gpu-01`)
@@ -273,8 +274,10 @@ For each (specs are identical):
 | VM         | Hypervisor | vCPU | RAM | Disk | IP             |
 | ---------- | ---------- | ---- | --- | ---- | -------------- |
 | vault-01   | pve-01  | 2    | 2GB | 20GB | 192.168.40.20  |
-| vault-02   | pve-01  | 2    | 2GB | 20GB | 192.168.40.21  |
+| vault-02   | **pve-05** *(v5.4: was pve-01)* | 2    | 2GB | 20GB | 192.168.40.21  |
 | vault-03   | pve-02  | 2    | 2GB | 20GB | 192.168.40.22  |
+
+> **One Raft node per hypervisor *(v5.4 — ADR-011)*.** `vault-02` moved off pve-01 so no single hypervisor hosts two of the three OpenBao nodes. Do not "simplify" this back onto pve-01 while hand-creating the VMs — the whole point of the Tier 1 single-host-loss drill is that this spread holds. `mgmt-02` moves to pve-09 in the same change.
 
 - [ ] Create each VM in Proxmox UI from Ubuntu 24.04 ISO
 - [ ] Configure cloud-init with hostname, static IP on VLAN 40, your SSH key, `dalton` user with sudo, password auth disabled

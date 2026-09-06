@@ -124,9 +124,13 @@ spec:
 - **Does *not* change:** anything latency-sensitive. VM boot disks, `mgmt-02`'s etcd WAL, CloudNativePG, Harbor's hot layers, and model weights being pulled into VRAM all want local NVMe (roughly 5–7GB/s and ~0.05ms, versus ~280MB/s and ~1ms over 2.5GbE). Those stay on pve-09 regardless.
 - Consequently a NAS **removes** capacity pressure from pve-09's mirror rather than arguing against it. The ZFS mirror decision in ADR-011 is unaffected by acquiring a NAS — what a NAS changes is *where `nfs-01` and Garage live*, which is the actual thing to revisit.
 
-**Trigger to revisit:** a NAS is acquired, or the pve-01 storage SPOF causes a real outage. Two independent smaller steps are available before then and are worth taking on their own merits: (a) a **Garage replica on pve-09's mirror** — cheap, and it makes the object tier survive a pve-01 loss; (b) moving `nfs-01` to pve-09, which trades one SPOF for another but lands it on mirrored disks with more headroom.
+**The capacity math makes this less optional than it first looked.** pve-09's mirror is **~900GB usable** (2× 1TB), and ADR-011's budget already commits most of it: ~50GB Proxmox, 60GB `mgmt-02`, ~200GB build VM, 250GB `prod-gpu-01`, leaving roughly 340GB shared between ZFS snapshots and the local model cache. So the two cheap mitigations below **compete with each other and with the model cache** for the same space — they are not free, and pve-09 is not a place to park a full storage tier. A NAS is what actually resolves this rather than shuffling it.
 
-**Effort:** the Garage replica is an evening. A full storage-tier relocation is 1–2 weekends including a Velero restore drill against the new target, and should not be attempted before the Tier 1 DR runbooks have been exercised once.
+**Trigger to revisit:** a NAS is acquired, or the pve-01 storage SPOF causes a real outage. Two independent smaller steps are available before then and are worth taking on their own merits, with the caveat above: (a) a **Garage replica on pve-09's mirror**, sized deliberately (a bounded bucket subset, not a full mirror of the object tier) — it makes the most important objects survive a pve-01 loss; (b) moving `nfs-01` to pve-09, which trades one SPOF for another but lands it on mirrored disks — attractive only if the dataset is small, which is exactly what a NAS would stop constraining.
+
+**Effort:** a scoped Garage replica is an evening. A full storage-tier relocation is 1–2 weekends including a Velero restore drill against the new target, and should not be attempted before the Tier 1 DR runbooks have been exercised once.
+
+**If you do buy one:** the thing that matters most for this platform is not raw capacity but **link speed and redundancy** — 2.5GbE or better (both switches are managed UniFi, so the uplink is the question), and a redundant pool. Note that pve-09's own NIC speed is a Phase 0.1 verification item for the same reason.
 
 ## Papermill for Parameterized Notebooks
 

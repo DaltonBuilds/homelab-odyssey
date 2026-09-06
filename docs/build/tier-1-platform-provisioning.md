@@ -402,7 +402,7 @@ locals {
     # v5.4 (ADR-011) — GPU worker on the tower. Provisioned here; the GPU is not
     # attached and the node is not joined to the cluster until Tier 5. Tainted on
     # join so nothing schedules here by accident.
-    prod-gpu-01 = { node = "pve-09", ip = "192.168.50.34", role = "worker",        cpu = 8, mem = 32768, disk = 500 }
+    prod-gpu-01 = { node = "pve-09", ip = "192.168.50.34", role = "worker",        cpu = 8, mem = 32768, disk = 250 }
   }
 }
 
@@ -434,7 +434,7 @@ module "homelab_prod_node" {
 
 > **One VM per M920q — why not pack more?** Keeping a single prod node per physical box preserves the failure boundary the bare-metal layout had (one hardware failure = one lost K8s node, which the cluster tolerates) while gaining reproducibility, snapshots, and noVNC console. Bin-packing multiple prod nodes onto one M920q would reintroduce a correlated-failure domain — don't.
 
-> **`prod-gpu-01` sizing and staging *(v5.4 — ADR-011)*.** It gets 8 vCPU / 32GB / 500GB because it is the only node expected to run model-serving workloads and cache model weights locally; the 500GB comes out of pve-09's 2TB mirror, leaving room for `mgmt-02`, the build VM, and headroom. Two staging rules:
+> **`prod-gpu-01` sizing and staging *(v5.4 — ADR-011)*.** It gets 8 vCPU / 32GB / **250GB**. The disk is deliberately modest: pve-09's mirror yields only **~900GB usable** (2× 1TB, mirrored), which after Proxmox (~50GB), `mgmt-02` (60GB), and the build VM (~200GB) leaves roughly 340GB for snapshots *and* the local model cache. So **model weights live on Garage/NFS with a bounded local cache**, not staged wholesale on this VM's disk — 250GB is sized for the OS, container images, and a working cache. If model-serving genuinely needs more local NVMe, that is the signal to add disks or a NAS (see [Future Upgrades](future-upgrades.md)), not to grow this VM until the pool is full. Two staging rules:
 >
 > 1. **The GPU is not attached at this phase.** Provision the VM here with the rest of the fleet, but add the `hostpci0` passthrough entry and join the node to the cluster in Tier 5. Roles 1–2 of pve-09 (`mgmt-02`, build host) do not need the GPU and should not wait on it.
 > 2. **Taint on join** so the general workload pool never lands here:
@@ -498,7 +498,7 @@ module "homelab_dev_node" {
 locals {
   homelab_mgmt_nodes = {
     mgmt-01     = { ip = "192.168.40.60", proxmox = "pve-01", cpu = 4, mem = 6144, disk = 60 }
-    mgmt-02  = { ip = "192.168.40.61", proxmox = "pve-01", cpu = 4, mem = 6144, disk = 60 }
+    mgmt-02  = { ip = "192.168.40.61", proxmox = "pve-09", cpu = 4, mem = 6144, disk = 60 }  # v5.4: was pve-01 (ADR-011)
     mgmt-03   = { ip = "192.168.40.62", proxmox = "pve-02", cpu = 4, mem = 6144, disk = 60 }
   }
 }
@@ -527,7 +527,7 @@ module "mgmt_node" {
 
 > **v5 — these are Talos nodes.** They are provisioned as VMs here but configured declaratively in Phase 1.10 via `talosctl`, not by Ansible. They have no SSH, are excluded from `roles/hardening` (1.5) and Vault SSH OTP (1.6), and carry no cloud-init OS user.
 
-> **HA topology *(rewritten in v5.4 — ADR-011)*.** The three mgmt nodes sit on **three different hypervisors**: `mgmt-01` → pve-01, `mgmt-02` → **pve-09**, `mgmt-03` → pve-02. Any single hypervisor loss leaves 2 of 3 alive and etcd keeps quorum. Set `node` accordingly in the `homelab_mgmt_nodes` map — `mgmt-02` must target `pve-09`, not `pve-01`.
+> **HA topology *(rewritten in v5.4 — ADR-011)*.** The three mgmt nodes sit on **three different hypervisors**: `mgmt-01` → pve-01, `mgmt-02` → **pve-09**, `mgmt-03` → pve-02. Any single hypervisor loss leaves 2 of 3 alive and etcd keeps quorum. This is already set in the `homelab_mgmt_nodes` map above — note the key there is `proxmox`, not `node` as in the homelab-prod map, so `mgmt-02` must read `proxmox = "pve-09"`.
 >
 > *Superseded reasoning, kept for traceability:* through v5.3 this was 2 nodes on pve-01 and 1 on pve-02, documented as deliberate "asymmetric availability" on the grounds that pve-01 was the prod-adjacent host. That was a rationalization of a hardware constraint — with only two hypervisors there was nowhere else to put the third node. The constraint disappeared at v5.2 (Proxmox everywhere) and the concentration was left as an open decision through v5.3; v5.4 closes it. `vault-02` moves to pve-05 in the same change, so the two relocated quorum nodes land on *different* hosts rather than both on one. See the resolved failure-domain note in [Network Reference](02-network-reference.md).
 

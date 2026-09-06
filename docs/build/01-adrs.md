@@ -129,7 +129,7 @@ The evaluation was run twice, deliberately: once against **Mission 1** (defense 
 
 ### ADR-011 — The workstation tower is reassigned to the fleet as `pve-09`; the MacBook Pro becomes the sole workstation *(v5.4)*
 
-**Context.** A ninth physical machine existed outside the inventory this whole time: a tower (ASRock AM5 board, **Ryzen 9 7900X** 12c/24t, **64GB** RAM, **2× 2TB NVMe**, **GeForce RTX 5070** 12GB) historically treated as the home-office daily-driver workstation. It has run an untouched Fedora install for months — all v5 design work happened on the MacBook Pro (M2 Max).
+**Context.** A ninth physical machine existed outside the inventory this whole time: a tower (ASRock AM5 board, **Ryzen 9 7900X** 12c/24t, **64GB** RAM, **2× 1TB NVMe**, **GeForce RTX 5070** 12GB) historically treated as the home-office daily-driver workstation. It has run an untouched Fedora install for months — all v5 design work happened on the MacBook Pro (M2 Max).
 
 Three separate problems were pointing at it, and none of them had a good answer inside the eight-host inventory:
 
@@ -146,7 +146,7 @@ Three separate problems were pointing at it, and none of them had a good answer 
 | 3 | **GPU worker** — `prod-gpu-01`, joined to homelab-prod, tainted and labeled as a resource-type node pool | Tier 5 |
 | 4 | **Storage SPOF mitigation** — Garage replica or a future home for `nfs-01` | Opportunistic |
 
-Storage on `pve-09` is a **ZFS mirror** across both 2TB sticks (2TB usable), which makes it the **first ZFS-root Proxmox host in the fleet** — every other host is ext4-on-single-disk per ADR-008.
+Storage on `pve-09` is a **ZFS mirror** across both 1TB sticks (**~1TB usable**), which makes it the **first ZFS-root Proxmox host in the fleet** — every other host is ext4-on-single-disk per ADR-008.
 
 **Rationale.**
 
@@ -158,7 +158,19 @@ Storage on `pve-09` is a **ZFS mirror** across both 2TB sticks (2TB usable), whi
 
 *4. It scores on both missions, which per [Purpose & Mandate](00-overview.md#purpose--mandate-v53) is the strongest available signal.* Mission 1 gets a native amd64 build/CI host and real headroom for STIG/FIPS break-rebuild loops. Mission 2 gets local GPU for the dojo and a decade of compute headroom. Neither mission has to concede anything.
 
-*5. ZFS mirror over stripe or split, despite the capacity cost.* The mirror is not buying bulk capacity — it is buying VM-disk resilience and a fast local snapshot surface on the one box that will host a quorum node *and* absorb risky GPU-driver and STIG changes. A degraded mirror keeps running and the stick gets replaced at leisure; a dead stripe is a rebuild. The capacity argument was also checked against the future-NAS question and **survives it**: a NAS absorbs bulk cold data (model archives, datasets, Velero targets, Garage objects, NFS-backed PVCs) but cannot serve VM boot disks, `mgmt-02`'s etcd WAL, or CNPG at NVMe latency. A NAS therefore *removes* the capacity pressure against mirroring rather than adding to it. Sizing check: Proxmox plus VM disks lands near 500GB, leaving comfortable room for a local model cache and image/layer cache inside 2TB.
+*5. ZFS mirror over stripe or split, despite the capacity cost.* The mirror is not buying bulk capacity — it is buying VM-disk resilience and a fast local snapshot surface on the one box that will host a quorum node *and* absorb risky GPU-driver and STIG changes. A degraded mirror keeps running and the stick gets replaced at leisure; a dead stripe is a rebuild. The capacity argument was also checked against the future-NAS question and **survives it**: a NAS absorbs bulk cold data (model archives, datasets, Velero targets, Garage objects, NFS-backed PVCs) but cannot serve VM boot disks, `mgmt-02`'s etcd WAL, or CNPG at NVMe latency. A NAS therefore *removes* the capacity pressure against mirroring rather than adding to it.
+
+*Sizing check, and it is genuinely tight.* The sticks are **1TB each, not 2TB** — so the mirror yields roughly 900GB of practically usable space after ZFS overhead, not 2TB. Budget:
+
+| Consumer | Allocation |
+| --- | --- |
+| Proxmox root + swap | ~50GB |
+| `mgmt-02` (Talos node, `disk = 60`) | 60GB |
+| amd64 build VM (image/layer cache churns) | ~200GB |
+| `prod-gpu-01` | 250GB |
+| **Remaining for snapshots + local model cache** | **~340GB** |
+
+That is adequate, not roomy, and it has two real consequences worth stating rather than discovering: **(a)** model weights belong on Garage/NFS with a *bounded* local cache on `prod-gpu-01`, not staged wholesale on the mirror — which is why `prod-gpu-01` is sized at 250GB rather than the 500GB a 2TB pool would have justified; **(b)** ADR-011 role 4 (a Garage replica on pve-09) now **competes for the same ~340GB** as snapshots and the model cache, so it is no longer close to free. It is still the cheapest available fix for the pve-01 storage SPOF, but it should be sized deliberately, and it strengthens rather than weakens the case for a NAS. Stripe would have bought 2TB and removed all of this pressure — it is still rejected, because "either stick dying takes the pool" is the wrong trade on the box hosting a quorum node, and the honest answer to a capacity squeeze is more disks or a NAS, not less redundancy.
 
 **Consequences.**
 

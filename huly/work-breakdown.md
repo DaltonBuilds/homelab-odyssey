@@ -49,7 +49,7 @@ This document translates the build docs into Huly work items. It is the source y
 
 **Epic [0.1b] pve-09 — tower onboarding** — `proxmox`, `gpu` *(v5.4, ADR-011)*
 - Story: Pre-install hardware checks — matching NVMe models/capacity; both M.2 slots at full lanes with the 5070 populated; IOMMU/AMD-Vi + SVM enabled in UEFI; note NIC link speed. *(No data rescue needed — confirmed at planning time.)*
-- Story: Install Proxmox VE with **ZFS RAID1 mirror** across both 2TB NVMe; IP `192.168.40.66`; hostname `pve-09`.
+- Story: Install Proxmox VE with **ZFS RAID1 mirror** across both 1TB NVMe (~900GB usable); IP `192.168.40.66`; hostname `pve-09`. Plan the space budget before provisioning VMs — the pool is adequate, not roomy.
 - Story: Cap `zfs_arc_max` (~10GB) via `/etc/modprobe.d/zfs.conf` + `update-initramfs -u`; reboot. **The one step easiest to forget and most annoying to diagnose.**
 - Story: `vmbr0` trunk VLANs 40 + 50; upload Ubuntu cloud image **and** Talos `metal-amd64.iso`.
 - Story: GPU passthrough prep — `amd_iommu=on iommu=pt`, verify isolated IOMMU group, blacklist `nouveau`/`nvidia`, bind `vfio-pci`. **Do not install NVIDIA drivers on the host.**
