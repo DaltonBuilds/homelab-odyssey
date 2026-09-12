@@ -48,6 +48,26 @@ Native VLAN 40 means the host sends management traffic untagged. The management 
 - [ ] Check hostname -f, ip -br address, ip route, timedatectl, and pveversion -v. Confirm DNS resolution and synchronized clocks. Verify UI and SSH access after reboot before repeating on the next machine.
 - [ ] On pve-09 verify zpool status shows an ONLINE two-disk mirror. Apply the documented ARC limit and verify it after reboot. GPU binding/passthrough can wait until remote access works; it is not part of this day's acceptance gate.
 
+### Optional post-install helper
+
+The owner uses the community-maintained [Proxmox VE Post Install helper](https://community-scripts.org/scripts?q=post+install&preview=post-pve-install). Run in each Proxmox host's root shell after network/DNS access works, before joining; it can handle the repository/update step above:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"
+```
+
+This runs third-party code from a changing `main` branch as root; review the [source](https://github.com/community-scripts/ProxmoxVE/blob/main/tools/pve/post-pve-install.sh) and record execution date, choices, and resulting version. Source checked 2026-09-12 accepts PVE 9.2.x. It also loads a telemetry helper.
+
+For this lab, without a subscription: disable enterprise, enable/keep No-Subscription, skip unused Ceph and test repositories. Subscription-dialog removal is optional and patches UI files. Choose **No** to **Disable high availability?** and **No** to **Disable Corosync?** if shown. Leave default services intact; no HA-managed guests is a separate setting. If previously disabled, restore cluster services before joining; do not assume the helper left them enabled. Update/reboot one member at a time once clustered, preserving quorum.
+
+Verify update results: the script can print completion after an APT failure. Check `apt update`, `pveversion -v`, rebooted UI access, and `pvecm status` after joining. Successful helper execution does not replace the acceptance checks.
+
+### Physical-link troubleshooting and installation notes
+
+If a new host is unreachable, run `ip -br address` at its local console. A DOWN interface warrants checking its administrative state, cable, link lights, and actual switch port before changing VLANs. Trace host → patch panel → switch; adjacent panel and switch numbers do not guarantee matching connections.
+
+**Confirmed 2026-09-12:** pve-01 reachable from the MacBook; pve-02 initially had a DOWN NIC because patch-panel connections were shifted by one. Moving pve-02 to the office switch's **port 6** and configuring native VLAN 40 with tagged 50/60 restored access. Record port 6 as pve-02's current connection; other port mappings remain to be verified.
+
 ## 4. Create the cluster before creating guests
 
 - [ ] Keep installed members powered on throughout joining. Have at least three ready so the initial two-member stage is brief. Do not power off the first member while installing the rest.

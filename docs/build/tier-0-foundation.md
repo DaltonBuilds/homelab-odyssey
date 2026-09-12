@@ -34,6 +34,8 @@
 
 **Goal:** Every physical machine running Proxmox VE, accessible from workstation, ready to host VMs. *(v5.2: this now includes the M920q trio and M920x #2, which formerly ran bare-metal Ubuntu — see ADR-008. v5.4: and pve-09, the former workstation tower — see ADR-011.)*
 
+Optional: use the [post-install helper](proxmox-day-one.md#optional-post-install-helper) for repository setup and updates on each host. Follow its cluster-specific prompt guidance: retain Corosync and default HA services, while leaving guests out of automatic HA.
+
 #### pve-01 (existing M920 SFF, 64GB / 1TB)
 
 If already installed from v3, skip to verification. Otherwise follow the v3 Phase 0 procedure.
