@@ -6,13 +6,13 @@
 
 ## Tier 0 — Foundation
 
-**Purpose:** Establish the substrate everything else depends on. By the end of Tier 0, you have all nine physical hypervisors online (pve-01/02 standing platform + dev, pve-03/04 ephemeral-capacity, pve-05 spare + vault-02 host, pve-06/07/08 hosting the homelab-prod node VMs, pve-09 GPU + build + mgmt-02 host), a redundant BGP routing fabric, and a fully-configured OpenBao HA cluster with PKI, Transit, SSH OTP, and Database engines ready to issue credentials. **No Kubernetes exists yet.** Nothing in higher tiers can begin until Tier 0 verification passes.
+**Purpose:** Establish the substrate everything else depends on. By the end of Tier 0, you have all seven physical hypervisors online (pve-01/02 standing platform + dev, pve-05 spare + vault-02 host, pve-06/07/08 hosting the homelab-prod node VMs, pve-09 GPU + build + mgmt-02 host), a redundant BGP routing fabric, and a fully-configured OpenBao HA cluster with PKI, Transit, SSH OTP, and Database engines ready to issue credentials. **No Kubernetes exists yet.** Nothing in higher tiers can begin until Tier 0 verification passes.
 
 **Why this tier exists separately:** v3 treated Vault as an application — Phase 6, after the cluster existed. That created a circular dependency (Ansible needed secrets to build the cluster; Vault lived in the cluster Ansible built). v4 inverts this: Vault is foundation, every later tier consumes it.
 
 ### Tier 0 Phases
 
-- **0.1** — Proxmox installation on all nine physical hypervisors *(v5.4: pve-09 added)*
+- **0.1** — Proxmox installation on all seven physical hypervisors *(v5.4: pve-09 added)*
 - **0.2** — Switch / VLAN configuration verification
 - **0.3** — VyOS deployment and BGP fabric
 - **0.4** — Vault VM provisioning (bootstrap-mode, manual)
@@ -30,6 +30,8 @@
 
 ### Phase 0.1: Proxmox Installation (All Physical Hypervisors)
 
+**Start with [Day one — Proxmox + UniFi](proxmox-day-one.md): prepare management networking first, install the seven confirmed hosts, and join `homelab-pve` before provisioning guests.** The host-specific checklist below supplements that procedure. Host management keeps the working UniFi gateway; later VyOS gateway changes require explicit routing verification.
+
 **Goal:** Every physical machine running Proxmox VE, accessible from workstation, ready to host VMs. *(v5.2: this now includes the M920q trio and M920x #2, which formerly ran bare-metal Ubuntu — see ADR-008. v5.4: and pve-09, the former workstation tower — see ADR-011.)*
 
 #### pve-01 (existing M920 SFF, 64GB / 1TB)
@@ -38,38 +40,27 @@ If already installed from v3, skip to verification. Otherwise follow the v3 Phas
 
 - [ ] Confirm pve-01 reachable at `192.168.40.50`
 - [ ] Update Proxmox to latest stable patch release: `apt update && apt dist-upgrade`
-- [ ] Verify `vmbr0` bridge accepts trunked VLANs 40, 50 (add VLAN 50 if v3 didn't include it)
+- [ ] Verify VLAN-aware `vmbr0`, native management VLAN 40, and tagged guest VLANs 50/60 for VyOS
 
 #### pve-02 (new M920x, 32GB / 1TB)
 
 - [ ] Download latest stable Proxmox VE ISO, flash to USB
 - [ ] Install Proxmox on the 1TB SSD, ext4 root filesystem (not ZFS — ZFS lives in the NFS VM only)
-- [ ] Set management IP: `192.168.40.55`, gateway `192.168.40.1` (this will be the VyOS VRRP IP once routers are up — temporarily set to existing gateway, fix later)
+- [ ] Set management IP: `192.168.40.55`, gateway **the actual existing UniFi VLAN 40 gateway**
 - [ ] Hostname: `pve-02`
 - [ ] Complete installation, reboot
 - [ ] Access UI from workstation: `https://192.168.40.55:8006`
 - [ ] Apt update + dist-upgrade
-- [ ] Configure `vmbr0` to accept trunked VLANs 40, 60
+- [ ] Configure VLAN-aware `vmbr0`, native management VLAN 40, and tagged guest VLANs 50/60 for VyOS
 - [ ] Set DHCP reservation on edge router for `192.168.40.55`
 - [ ] Upload Ubuntu Server 24.04 ISO and VyOS LTS ISO to local storage
-
-#### pve-03 / pve-04 (2× NUC — ephemeral capacity) *(v5)*
-
-These stay powered but idle until an ephemeral drill needs them. They are deliberately not part of the standing platform.
-
-- [ ] Install Proxmox VE on each NUC (ext4 root)
-- [ ] Management IPs: `192.168.40.56` (pve-03), `192.168.40.57` (pve-04), gateway `192.168.40.1`
-- [ ] Hostnames `pve-03` / `pve-04`; apt update + dist-upgrade
-- [ ] Configure `vmbr0` to accept trunked VLANs 40 and 70 (the ephemeral VLAN — see Network notes)
-- [ ] Upload the **Talos** `metal-amd64.iso` (and the FIPS image variant if entitled) to local storage on each
-- [ ] DHCP reservations on the edge router for both
 
 #### pve-05 (M920x #2, 32GB / 1TB — spare + quorum) *(v5.2)*
 
 Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacity plus the home of the relocated **`vault-02`** *(v5.4: decided — `mgmt-02` went to pve-09 instead, so the two relocated quorum nodes sit on different hosts. See ADR-011 and the resolved failure-domain note in Network Architecture.)*
 
 - [ ] Install Proxmox VE on the 1TB SSD, ext4 root
-- [ ] Management IP `192.168.40.58`, gateway `192.168.40.1`; hostname `pve-05`; apt update + dist-upgrade
+- [ ] Management IP `192.168.40.58`, gateway **the actual existing UniFi VLAN 40 gateway**; hostname `pve-05`; apt update + dist-upgrade
 - [ ] Configure `vmbr0` to accept trunked VLAN 40 (add VLAN 50 if you place a prod-tier VM here)
 - [ ] Upload Ubuntu Server 24.04 cloud image to local storage
 - [ ] DHCP reservation on the edge router
@@ -79,7 +70,7 @@ Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacit
 Each M920q hosts exactly **one** homelab-prod node VM (pve-06 → prod-cp-01, pve-07 → prod-w-01, pve-08 → prod-w-02), provisioned by OpenTofu in Phase 1.3 — one VM per box preserves the per-machine failure boundary the bare-metal layout had, while making the node reproducible and snapshottable.
 
 - [ ] Install Proxmox VE on each 512GB SSD, ext4 root (no ZFS — keeps host RAM overhead to ~1–1.5GB on these 16GB boxes)
-- [ ] Management IPs: `192.168.40.59` (pve-06), `192.168.40.64` (pve-07), `192.168.40.65` (pve-08), gateway `192.168.40.1`
+- [ ] Management IPs: `192.168.40.59` (pve-06), `192.168.40.64` (pve-07), `192.168.40.65` (pve-08), gateway **the actual existing UniFi VLAN 40 gateway**
 - [ ] Hostnames `pve-06` / `pve-07` / `pve-08`; apt update + dist-upgrade
 - [ ] Configure `vmbr0` to accept trunked VLAN 50 (the homelab-prod cluster VLAN) — and VLAN 40 for the management interface
 - [ ] Upload Ubuntu Server 24.04 cloud image to local storage on each
@@ -101,7 +92,7 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 - [ ] Install Proxmox VE selecting **ZFS RAID1 (mirror)** across both 1TB NVMe sticks — **~900GB practically usable** after ZFS overhead. *(Deliberate exception to ADR-008's ext4-on-single-disk pattern; rationale and the full space budget are in ADR-011.)*
 - [ ] **Plan the space budget before provisioning VMs.** ~50GB Proxmox + 60GB `mgmt-02` + ~200GB build VM + 250GB `prod-gpu-01` leaves roughly 340GB for snapshots and the local model cache. This pool is adequate but not roomy — keep model weights on Garage/NFS with a bounded local cache, and size any future Garage replica here deliberately rather than assuming it's free
-- [ ] Management IP `192.168.40.66`, gateway `192.168.40.1`; hostname `pve-09`; apt update + dist-upgrade
+- [ ] Management IP `192.168.40.66`, gateway **the actual existing UniFi VLAN 40 gateway**; hostname `pve-09`; apt update + dist-upgrade
 - [ ] **Cap the ARC:** write `options zfs zfs_arc_max=10737418240` (10GB) to `/etc/modprobe.d/zfs.conf`, then `update-initramfs -u` and reboot. 64GB shared between `mgmt-02`, a build VM, `prod-gpu-01`, and an uncapped ARC will otherwise get tight
 - [ ] Configure `vmbr0` to accept trunked VLANs **40 and 50** (40 for `mgmt-02` and management, 50 for `prod-gpu-01`)
 - [ ] Upload the Ubuntu Server 24.04 cloud image **and** the Talos `metal-amd64.iso` (this host runs both a Talos mgmt node and Ubuntu-based RKE2/build VMs)
@@ -119,10 +110,10 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 #### Verification
 
-- [ ] All nine Proxmox web UIs load from workstation
-- [ ] `ping` succeeds to every hypervisor management IP (`.50`, `.55`, `.56`, `.57`, `.58`, `.59`, `.64`, `.65`, `.66` on VLAN 40)
+- [ ] All seven Proxmox web UIs load from workstation
+- [ ] `ping` succeeds to every hypervisor management IP (`.50`, `.55`, `.58`, `.59`, `.64`, `.65`, `.66` on VLAN 40)
 - [ ] Ubuntu 24.04 cloud image + VyOS/Talos ISOs visible in the relevant Proxmox storage pools
-- [ ] No clustering configured between any hosts (verify in each Datacenter view — each shows only itself)
+- [ ] All seven hosts joined to `homelab-pve`; `pvecm status` reports seven nodes, seven expected votes, quorum four, and `Quorate: Yes`; no HA-managed guests
 - [ ] `zpool status` on pve-09 shows a healthy 2-way mirror; `arc_summary` reflects the capped `zfs_arc_max` *(v5.4)*
 - [ ] `lspci -nnk` on pve-09 shows the RTX 5070 bound to `vfio-pci` *(v5.4)*
 
@@ -134,11 +125,11 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 This is the most boring and most critical phase. BGP, cluster separation, everything downstream assumes VLAN trunking is correct.
 
-> **Topology (v5.4):** two managed UniFi switches — an upstream switch feeding the home-office wall jacks, and an 8-port switch in the office. **pve-09 lands on its own office jack, not on the office switch**, so its trunk is configured on the upstream switch and must survive the inter-switch path. Getting this right on the office switch alone leaves pve-09 reachable on the native VLAN while silently missing 40/50 — which surfaces much later as a VM that never gets an address. Verify the jack, not just the switch port. Also sanity-check port count: nine hypervisors plus the workstation plus the edge uplink is eleven endpoints across the two switches.
+> **Topology (v5.4):** two managed UniFi switches — an upstream switch feeding the home-office wall jacks, and an 8-port switch in the office. **pve-09 lands on its own office jack, not on the office switch**, so its trunk is configured on the upstream switch and must survive the inter-switch path. Getting this right on the office switch alone leaves pve-09 reachable on the native VLAN while silently missing 40/50 — which surfaces much later as a VM that never gets an address. Verify the jack, not just the switch port. Also sanity-check port count: seven hypervisors plus the workstation plus the edge uplink is nine endpoints across the two switches.
 
-- [ ] Identify port assignments across **both** switches for pve-01 through pve-09, the workstation, and the uplink to the edge router *(v5.2: six more hypervisor ports than the two-host layout — the M920q prod hosts pve-06/07/08 in particular must trunk VLAN 50. v5.4: pve-09 added, on an office jack fed by the upstream switch.)*
-- [ ] Configure each hypervisor port as a trunk carrying VLANs 10, 40, 50, 60 (PVID 10 for workstation; tagged everywhere on hypervisor uplinks). Ephemeral hosts (pve-03/04) additionally carry VLAN 70.
-- [ ] Confirm the **inter-switch link** carries all four VLANs tagged — the office jacks are downstream of it *(v5.4)*
+- [ ] Identify port assignments across **both** switches for pve-01, pve-02, pve-05, pve-06, pve-07, pve-08, and pve-09, the workstation, and the uplink to the edge router *(v5.2: five more hypervisor ports than the two-host layout — the M920q prod hosts pve-06/07/08 in particular must trunk VLAN 50. v5.4: pve-09 added, on an office jack fed by the upstream switch.)*
+- [ ] In UniFi Port Manager, set hypervisor ports to **Native VLAN 40** and custom **Tagged VLAN Management** for guest VLANs: pve-01/02 need 50 and 60 for the VyOS routers; pve-06/07/08/09 need 50; pve-05 needs no extra guest VLAN initially. Add 70 to the chosen ephemeral host and every upstream link before a drill. Workstation access port: native VLAN 10.
+- [ ] Confirm the **inter-switch link** carries 10/40/50/60 and matches native VLAN settings at both ends; add 70 before ephemeral use. Preserve existing switch/AP management.
 - [ ] Create VLAN interfaces on the edge router for VLANs 50 and 60 (if not already present for 10/40)
 - [ ] Add temporary DHCP scopes on VLANs 50 and 60 (you'll replace with static cloud-init later; useful for first-boot testing)
 - [ ] Add static routes on edge router (these point at VyOS VRRP IP once it's up; for now, you can defer until Phase 0.3 is complete):
@@ -983,8 +974,8 @@ You may not advance to Tier 1 until **every** item below passes.
 
 #### Hypervisor & network
 
-- [ ] All nine Proxmox hosts operational, accessible from workstation, no clustering between any of them *(v5.4: pve-09 included — plus a healthy ZFS mirror and the GPU bound to `vfio-pci`)*
-- [ ] Both switches trunk VLANs 10, 40, 50, 60 to every hypervisor uplink (VLAN 50 reaches pve-06/07/08 **and pve-09**; VLAN 70 reaches pve-03/04), and the inter-switch link carries all four tagged *(v5.4)*
+- [ ] All seven Proxmox hosts operational, accessible from workstation, joined to `homelab-pve` with healthy quorum and no HA-managed guests *(v5.4: pve-09 included — plus a healthy ZFS mirror and the GPU bound to `vfio-pci`)*
+- [ ] Both switches use the Phase 0.2 native/tagged port matrix; inter-switch links carry 10/40/50/60 (and 70 when used), with matching native VLAN settings. Test guest traffic through pve-09’s actual wall jack.
 - [ ] `ping 192.168.40.1` from workstation succeeds (VRRP virtual IP responds)
 
 #### BGP fabric

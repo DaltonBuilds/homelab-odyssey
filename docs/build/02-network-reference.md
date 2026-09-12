@@ -6,6 +6,8 @@
 
 ## Network Architecture (Reference)
 
+**Current installation baseline (ADR-012):** seven members in `homelab-pve`; pve-03/pve-04 and .56/.57 are unused. All home networking equipment is UniFi. Follow the [day-one port matrix](proxmox-day-one.md) for native VLAN 40 on host-facing ports and tagged guest VLANs. The .1 gateways below are future VyOS VIPs, not verified current UniFi addresses. Keep the working UniFi gateway for host management and resolve any existing .1 ownership before configuring VRRP.
+
 ### VLAN plan
 
 | VLAN | Subnet            | Purpose                                          |
@@ -14,11 +16,11 @@
 | 40   | 192.168.40.0/24   | Platform tier (Proxmox, Vault, homelab-mgmt, NFS, Garage, BGP routers) |
 | 50   | 192.168.50.0/24   | homelab-prod cluster (prod nodes + LB pool)        |
 | 60   | 192.168.60.0/24   | homelab-dev cluster (dev/staging nodes + LB pool)      |
-| 70   | 192.168.70.0/24   | Ephemeral clusters (pve-03/pve-04, disposable — ADR-004) *(v5.1)* |
+| 70   | 192.168.70.0/24   | Ephemeral clusters (capacity-checked existing hosts — ADR-004/012) *(v5.1)* |
 
 > **Note on VLAN expansion:** v3 used a single workload VLAN (40). v4 separates platform from prod from dev/staging, mirroring how real shops carve impact-level / tenancy boundaries at L2. Your switch must support VLAN trunks to **every Proxmox host** (v5.2: that now includes the M920q/M920x #2 boxes carrying the prod-tier VLAN 50). Configure trunks before starting Tier 0.
 >
-> **v5.4 — two switches, one L2 domain.** The fabric is two managed UniFi switches: an upstream switch that feeds the home-office wall jacks, and an 8-port switch in the office. pve-09 lands on its own office jack rather than on the office switch, so **the trunk must be configured on both switches and on the inter-switch path** — VLANs 10/40/50/60 tagged end to end. A correct config on the office switch alone will leave pve-09 reachable on the native VLAN but silently missing 40/50, which surfaces much later as a VM that won't get an address. Verify the jack, not just the switch port.
+> **v5.4 — two switches, one L2 domain.** The fabric is two managed UniFi switches: an upstream switch that feeds the home-office wall jacks, and an 8-port switch in the office. pve-09 lands on its own office jack rather than on the office switch, so **the trunk must be configured on both switches and on the inter-switch path** — VLANs 10/40/50/60 carried across uplinks; host-facing ports use native 40 and tagged guest VLANs per the day-one matrix. A correct config on the office switch alone will leave pve-09 reachable on the native VLAN but silently missing 40/50, which surfaces much later as a VM that won't get an address. Verify the jack, not just the switch port.
 
 ### BGP ASN plan
 
@@ -39,8 +41,6 @@
 | Workstation            | 192.168.10.77   | 10   | Daily driver                            | Physical           |
 | pve-01 (M920 SFF)   | 192.168.40.50   | 40   | Hypervisor 1 (64GB, prod-adjacent)      | Physical           |
 | pve-02 (M920x #1)  | 192.168.40.55   | 40   | Hypervisor 2 (32GB, dev/staging)        | Physical           |
-| pve-03 (NUC)        | 192.168.40.56   | 40   | Hypervisor 3 — ephemeral capacity *(v5.1)* | Physical        |
-| pve-04 (NUC)        | 192.168.40.57   | 40   | Hypervisor 4 — ephemeral capacity *(v5.1)* | Physical        |
 | pve-05 (M920x #2)  | 192.168.40.58   | 40   | Hypervisor 5 (32GB, spare + quorum) *(v5.2)* | Physical        |
 | pve-06 (M920q)      | 192.168.40.59   | 40   | Hypervisor 6 — hosts prod-cp-01 *(v5.2)* | Physical        |
 | pve-07 (M920q)      | 192.168.40.64   | 40   | Hypervisor 7 — hosts prod-w-01 *(v5.2)*  | Physical        |
@@ -76,7 +76,7 @@
 > - **vault-02 → pve-05** (M920x #2, 32GB — ample headroom for one OpenBao node)
 > - **mgmt-02 → pve-09** (the tower, 64GB, mirrored NVMe — good etcd storage and the most headroom in the fleet)
 >
-> The Location cells above are updated accordingly. This is **strictly better than the old "Option 1,"** which put both nodes on pve-05 and merely relocated the correlated-failure problem: with the split, no single hypervisor loss can break either quorum. Both quorums now tolerate any one host failure, and the NUCs (pve-03/04) stay pristine for ephemeral drills.
+> The Location cells above are updated accordingly. This is **strictly better than the old "Option 1,"** which put both nodes on pve-05 and merely relocated the correlated-failure problem: with the split, no single hypervisor loss can break either quorum. Both quorums now tolerate any one host failure, and ephemeral drills must fit available fleet capacity (ADR-012).
 >
 > **Post-mitigation failure analysis:**
 >

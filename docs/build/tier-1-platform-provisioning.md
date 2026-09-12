@@ -1,5 +1,7 @@
 [← Docs index](../README.md) · **Operation Long Haul v5**
 
+**Proxmox cluster baseline (ADR-012):** all seven hosts share `homelab-pve`. Keep explicit target-node placement, use cluster-wide unique VM/CT IDs, and reconcile cluster-scoped users/tokens once. Existing endpoint examples can target different members of the same cluster; local storage is still node-specific (`local-lvm` on ext4 hosts, `local-zfs` on pve-09).
+
 [← Tier 0 · Foundation](tier-0-foundation.md)  ·  [Tier 2 · Platform Services →](tier-2-platform-services.md)
 
 ---
@@ -138,15 +140,12 @@ Before Terraform can run, the secrets it expects to read must exist in Vault. On
 
 ```bash
 # Create API tokens in Proxmox first (in the Proxmox UI: Datacenter → Permissions → API Tokens)
-# Generate one token per Proxmox host with PVE-VM-Admin role.
+# Create the automation token once in homelab-pve and assign the required ACLs.
+# Membership shares users/tokens; scope permissions to the intended resources.
 
 # Then write them into Vault under the path the Terraform provider expects
 bao kv put secret/terraform/proxmox \
   endpoint="https://192.168.40.50:8006/" \
-  api_token="root@pam!terraform=<the-token-secret>"
-
-bao kv put secret/terraform/pve-02 \
-  endpoint="https://192.168.40.55:8006/" \
   api_token="root@pam!terraform=<the-token-secret>"
 
 # Cloud-init SSH key for new VMs (your workstation's public key)

@@ -6,7 +6,7 @@
 
 # Ephemeral Environments (GitOps-Driven)
 
-Two complementary patterns, both reconciled by Flux and both built to be created on demand and destroyed without ceremony (ADR-004). This is the under-practiced production muscle — especially the air-gapped bring-up — and the reason the NUCs (pve-03/pve-04) exist.
+Two complementary patterns, both reconciled by Flux and both built to be created on demand and destroyed without ceremony (ADR-004). This is the under-practiced production muscle — especially the air-gapped bring-up — using spare fleet capacity rather than dedicated machines (ADR-012).
 
 ## Pattern A — In-cluster PR-preview namespaces (homelab-dev)
 
@@ -34,13 +34,15 @@ spec:
   timeout: 5m
 ```
 
-## Pattern B — Disposable Talos clusters on the NUCs (air-gap drills)
+## Pattern B — Disposable Talos clusters on available fleet capacity (air-gap drills)
 
-**What:** a whole throwaway Kubernetes cluster — its own Talos control plane — provisioned on pve-03/pve-04 for a specific exercise (an air-gap rehearsal, a Talos/Cilium upgrade test, a Big Bang bring-up), then `tofu destroy`-ed. Nothing about it is permanent.
+**What:** a whole throwaway Kubernetes cluster — its own Talos control plane — provisioned on a capacity-checked existing host for a specific exercise (an air-gap rehearsal, a Talos/Cilium upgrade test, a Big Bang bring-up), then `tofu destroy`-ed. Nothing about it is permanent.
+
+**Capacity gate:** select an existing host only after checking CPU, RAM, disk, and standing workload headroom; add VLAN 70 along its network path. Do not disrupt platform quorum workloads for a drill. Defer if no capacity is available.
 
 **Provisioning loop:**
 
-1. **OpenTofu** stands up the VM(s) on pve-03/pve-04 from the Talos image and applies a machine config (the same talosctl pattern as Phase 1.10, parameterized). One control-plane node is fine for a disposable cluster; add workers only if the drill needs them.
+1. **OpenTofu** stands up the VM(s) on a capacity-checked existing host from the Talos image and applies a machine config (the same talosctl pattern as Phase 1.10, parameterized). One control-plane node is fine for a disposable cluster; add workers only if the drill needs them.
 
 ```hcl
 # homelab-terraform/environments/ephemeral/main.tf
@@ -49,7 +51,7 @@ module "eph_cluster" {
                                                    # modules/proxmox-vm. Factor the Phase 1.10
                                                    # talosctl bring-up into this module first.
   cluster_name   = var.eph_name             # e.g. "eph-airgap-01"
-  hypervisor     = var.eph_host             # pve-03 or pve-04
+  hypervisor     = var.eph_host             # confirmed host with spare capacity; never an unowned NUC
   vlan_id        = 70                        # ephemeral VLAN
   control_planes = 1
   workers        = var.eph_workers
@@ -59,7 +61,7 @@ module "eph_cluster" {
 
 2. **Bootstrap + Flux.** `talosctl bootstrap`, pull the kubeconfig, then point Flux at a dedicated path (`clusters/ephemeral/<name>/`). For a *connected* drill, Flux pulls from GitHub as usual.
 
-3. **Air-gap variant — Zarf.** For an air-gap drill the NUC's cluster gets **no internet**. A Zarf package built earlier (`zarf package create`, carrying Cilium + Flux + a local Forgejo mirror + the workload) is delivered by `zarf package deploy` from a USB stick or a Garage-hosted tarball. After deploy, Flux reconciles from the *local* Forgejo mirror — the cluster is fully GitOps-managed and has never touched the internet. This is the DoD/Platform One workflow in miniature (ADR-005).
+3. **Air-gap variant — Zarf.** For an air-gap drill the disposable cluster gets **no internet**. A Zarf package built earlier (`zarf package create`, carrying Cilium + Flux + a local Forgejo mirror + the workload) is delivered by `zarf package deploy` from a USB stick or a Garage-hosted tarball. After deploy, Flux reconciles from the *local* Forgejo mirror — the cluster is fully GitOps-managed and has never touched the internet. This is the DoD/Platform One workflow in miniature (ADR-005).
 
 4. **Teardown.** `tofu destroy` removes the VMs; the per-cluster Talos secrets in Vault are deleted; the `clusters/ephemeral/<name>/` path is removed so Flux forgets it. No residue.
 
@@ -67,7 +69,7 @@ module "eph_cluster" {
 
 ### Verification (run per drill)
 
-- [ ] `tofu apply` brings up the ephemeral Talos cluster on pve-03/pve-04; `talosctl health` passes
+- [ ] `tofu apply` brings up the ephemeral Talos cluster on a capacity-checked existing host; `talosctl health` passes
 - [ ] Connected variant: Flux reconciles from GitHub; the app is live on the ephemeral VLAN
 - [ ] Air-gap variant: with egress blocked, `zarf package deploy` brings up Cilium + Flux + app, and Flux then reconciles from the local Forgejo mirror with zero internet pulls
 - [ ] `tofu destroy` leaves no VMs, no Vault secrets, and no lingering Flux Kustomization

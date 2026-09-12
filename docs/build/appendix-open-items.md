@@ -12,7 +12,7 @@ A full-document consistency sweep was run in August 2026. Most findings were fix
 
 1. ~~**Hypervisor failure domain** *(highest impact)* — pve-01 carries 2 of 3 OpenBao nodes and 2 of 3 mgmt control-plane nodes.~~ **RESOLVED (v5.4 — [ADR-011](01-adrs.md)):** `vault-02` → pve-05 and `mgmt-02` → **pve-09**, split across two different hosts so no single hypervisor loss breaks either quorum. The ⚠ callout under "IP allocation" is now a resolved note with a post-mitigation failure table, and a single-host-loss drill was added to the Tier 1 gate. *(Note: this went one better than the callout's own Option 1, which put both nodes on pve-05 and would have just relocated the correlated failure.)*
 2. ~~**M920x #2 role**~~ **RESOLVED** — assigned as `pve-05` in v5.2; it now hosts the relocated `vault-02` (v5.4).
-3. **Node-to-host mapping confirmation** — the Pre-Flight checkbox asking you to confirm exact NUC/M920q placement is still unchecked; the IP table now lists pve-03/pve-04 at `.56`/`.57` as a proposal, not a fact. *(v5.4: pve-09 at `.66` and `prod-gpu-01` at `192.168.50.34` are likewise proposals until the switch ports and jack are confirmed — see item 15.)*
+3. **Inventory confirmed (2026-09-12, ADR-012):** one M920 SFF, two M920x, three M920q, and the Ryzen tower. The NUC entries were erroneous and removed. Record actual MAC addresses, switch ports, and wall-jack paths during installation; retain existing real-host IP assignments.
 
 ### Authoring work still outstanding
 

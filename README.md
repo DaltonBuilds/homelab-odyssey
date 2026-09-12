@@ -1,5 +1,7 @@
 # Operation Long Haul — Production-Grade Homelab Foundation (v5)
 
+**Installing now? Start with the [seven-host Proxmox + UniFi day-one checklist](docs/build/proxmox-day-one.md).**
+
 A from-scratch, security-first homelab platform built to rehearse the practices real defense/regulated Kubernetes shops run on: immutable infrastructure, GitOps everywhere, a secrets substrate that every tool authenticates to, CIS/STIG-adjacent hardening, supply-chain attestation, air-gapped delivery, and tested disaster recovery.
 
 This repository is the **design and build documentation** for that platform. The implementation lives in three separate repos (below). No secrets or state are kept here — see [Security & publishing](#security--publishing).
@@ -8,7 +10,7 @@ This repository is the **design and build documentation** for that platform. The
 
 ## Architecture at a glance
 
-- **Hypervisors:** Proxmox VE on all **nine** physical nodes (no bare-metal Kubernetes — [ADR-008](docs/build/01-adrs.md)); each K8s node is an OpenTofu-provisioned VM. `pve-09` (Ryzen 9 7900X / 64GB / ZFS-mirrored NVMe / RTX 5070) is the GPU + amd64-build host, reassigned from workstation duty — [ADR-011](docs/build/01-adrs.md).
+- **Hypervisors:** Proxmox VE on all **seven** physical nodes in one Proxmox cluster (`homelab-pve`; ADR-012) (no bare-metal Kubernetes — [ADR-008](docs/build/01-adrs.md)); each K8s node is an OpenTofu-provisioned VM. `pve-09` (Ryzen 9 7900X / 64GB / ZFS-mirrored NVMe / RTX 5070) is the GPU + amd64-build host, reassigned from workstation duty — [ADR-011](docs/build/01-adrs.md).
 - **Clusters:** `homelab-prod` + `homelab-dev` on **RKE2** (CIS profile, encryption-at-rest, audit); `homelab-mgmt` on **Talos** (immutable, API-managed, no SSH). Quorum nodes are spread so no single hypervisor loss breaks OpenBao Raft or mgmt etcd.
 - **Networking:** Cilium CNI + BGP control plane advertising LB IPs to redundant **VyOS** speakers (VRRP); Gateway API ingress.
 - **Secrets:** **OpenBao** HA (Raft + GCP KMS auto-unseal) — PKI, Transit, SSH OTP, Database, KV engines; every tool (OpenTofu, Ansible, ESO, cert-manager, cosign) authenticates to it.

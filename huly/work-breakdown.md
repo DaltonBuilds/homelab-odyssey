@@ -41,11 +41,13 @@ This document translates the build docs into Huly work items. It is the source y
 ### Capability: Hypervisor & Network Fabric
 
 **Epic [0.1] Proxmox on all physical hypervisors** — `proxmox`
-- Story: Install Proxmox VE (ext4 root) on pve-01…pve-08. Tasks: one per host (pve-05 M920x #2; pve-06/07/08 M920q).
+- Story: Install Proxmox VE (ext4 root) on pve-01, pve-02, pve-05, pve-06, pve-07, and pve-08. Tasks: one per host (pve-05 M920x #2; pve-06/07/08 M920q).
 - Story: Set management IPs + hostnames + `apt dist-upgrade` on all hosts.
-- Story: Configure `vmbr0` VLAN trunks per host (VLAN 50 on pve-06/07/08 **+ pve-09**; VLAN 70 on pve-03/04).
+- Story: Configure `vmbr0` VLAN trunks per host (VLAN 50 on pve-06/07/08 **+ pve-09**; VLAN 70 on a capacity-checked existing host).
+- Story: Create `homelab-pve` on pve-01 and join the other six empty hosts before guest creation; reconcile node-local storage and cluster-wide guest IDs. Follow the [day-one checklist](../docs/build/proxmox-day-one.md).
+- Story: Configure UniFi native VLAN 40 on host ports and tagged guest VLANs per the day-one matrix; preserve existing gateway/DNS access.
 - Story: Upload Ubuntu 24.04 cloud image + VyOS/Talos ISOs to the relevant pools.
-- Story (verify): all 9 web UIs reachable; no clustering between hosts.
+- Story (verify): all seven web UIs reachable; all seven members visible from one UI; quorum healthy; no HA-managed guests.
 
 **Epic [0.1b] pve-09 — tower onboarding** — `proxmox`, `gpu` *(v5.4, ADR-011)*
 - Story: Pre-install hardware checks — matching NVMe models/capacity; both M.2 slots at full lanes with the 5070 populated; IOMMU/AMD-Vi + SVM enabled in UEFI; note NIC link speed. *(No data rescue needed — confirmed at planning time.)*
@@ -149,7 +151,7 @@ Detailed in a separate document (see [tier-5-mlops.md](../docs/build/tier-5-mlop
 
 ## Cross-cutting epic: Ephemeral Environments
 
-Not a milestone — a cross-cutting epic (tag onto Tier 2/4 once Flux + Zarf exist). Stories: [A] In-cluster PR-preview namespaces (Flux, homelab-dev) · [B] Disposable Talos clusters on pve-03/04 (OpenTofu + Flux + Zarf) with per-drill teardown. See [ephemeral-environments.md](../docs/build/ephemeral-environments.md).
+Not a milestone — a cross-cutting epic (tag onto Tier 2/4 once Flux + Zarf exist). Stories: [A] In-cluster PR-preview namespaces (Flux, homelab-dev) · [B] Disposable Talos clusters on a capacity-checked existing host (OpenTofu + Flux + Zarf) with per-drill teardown. See [ephemeral-environments.md](../docs/build/ephemeral-environments.md).
 
 ## Spike backlog (from Future Upgrades)
 
