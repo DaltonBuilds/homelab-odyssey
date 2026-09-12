@@ -77,7 +77,7 @@ commit
 save
 ```
 
-Configure your UniFi gateway to forward `homelab.internal` queries to `192.168.40.1` (the VRRP virtual IP). Settings → Networks → (your VLAN) → DHCP → DNS Server → add `192.168.40.1`. Or better: add a conditional DNS forwarder in the UniFi controller (Settings → Routing → DNS → conditional forwarding) so the routing happens at the gateway level for all clients.
+Keep clients using UniFi DNS at `192.168.40.1` once its DNS service is verified. At this phase, configure conditional forwarding for `homelab.internal` to the VyOS listener addresses `192.168.40.10` and `192.168.40.11`, using the DNS forwarding features supported by the installed UniFi release. Do not forward to UniFi itself (.1), and do not confuse a DHCP DNS-server setting with a conditional forwarding rule. The routing VIP `.12` is not a DNS endpoint in this configuration; listeners above bind to the routers’ individual addresses. Test both listeners directly and resolution through UniFi before relying on internal names.
 
 > **Why static records instead of a proper DNS server (CoreDNS/AdGuard):** Resisting infrastructure sprawl. Two records will change with any frequency (LB IPs for Gateway, added in Phase 2.6), and those go in by hand once per Gateway. If this list grows past ~20 entries, revisit and add CoreDNS as a dedicated platform service. For now, this is the right amount of complexity.
 
@@ -196,8 +196,8 @@ Mirror on bgp-02.
 
 #### Verification
 
-- [ ] `dig +short vault.homelab.internal @192.168.40.1` returns all three Vault IPs
-- [ ] `dig +short homelab-prod-api.homelab.internal @192.168.40.1` returns `192.168.50.30`
+- [ ] `dig +short vault.homelab.internal @192.168.40.10` returns all three Vault IPs; repeat against .11 and through UniFi at .1 after conditional forwarding is configured
+- [ ] `dig +short homelab-prod-api.homelab.internal @192.168.40.10` returns `192.168.50.30`
 - [ ] On bgp-01, `show ip bgp summary` shows BGP sessions in `Established` state for every cluster node
 - [ ] On any homelab-prod node, `kubectl exec -n kube-system ds/cilium -- cilium bgp peers` shows two peers (bgp-01, bgp-02) Established
 - [ ] Create a quick test Service with `type: LoadBalancer` and label `io.cilium/lb-pool: homelab-prod`, get an IP from the pool, `ping` that IP from your workstation. Delete the test service.

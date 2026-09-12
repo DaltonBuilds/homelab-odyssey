@@ -18,8 +18,8 @@ The tower is the seventh machine. pve-03/pve-04 and .56/.57 are unused, not inst
 
 ## 2. Prepare UniFi before relying on remote access
 
-- [ ] In UniFi Network, confirm VLAN 40 / 192.168.40.0/24 exists and record its actual gateway and working DNS resolver. Verify the planned static addresses are unused and excluded from DHCP allocation.
-- [ ] Use that working gateway during installation. The future VyOS VIP 192.168.40.1 is not a usable gateway until deployed. If UniFi already owns .1, do not add a duplicate VyOS VIP: resolve the gateway address plan before Phase 0.3. The example .254 in the VyOS configuration is not a verified device address.
+- [ ] In UniFi Network, confirm VLAN 40 / 192.168.40.0/24 exists; its gateway is **192.168.40.1 (UniFi, owner-confirmed)**. Verify DNS service at that address before using it as the resolver. Verify the planned static addresses are unused and excluded from DHCP allocation.
+- [ ] Use **192.168.40.1** as the installation gateway and retain it after VyOS deployment. The future VyOS VIP is **192.168.40.12**, reserved in this plan for LoadBalancer routing; verify it is unused and exclude it from DHCP before assigning it. VyOS itself routes upstream through UniFi at .1.
 - [ ] Permit laptop access from its actual LAN/SSID (planned VLAN 10) to host TCP 8006 and 22 plus ICMP, with return traffic. Allow host DNS, NTP, and HTTP/HTTPS egress for updates. Do not expose management ports to the WAN.
 - [ ] In each switch's Port Manager, set host-facing **Native VLAN / Network** to VLAN 40. Set **Tagged VLAN Management** to Custom using the table below. UI wording may vary by UniFi Network version.
 

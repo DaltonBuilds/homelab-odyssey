@@ -62,7 +62,7 @@ This document translates the build docs into Huly work items. It is the source y
 - Story: Trunk VLANs 10/40/50/60 (+70 to ephemeral hosts) to every hypervisor uplink + workstation, **on both UniFi switches**.
 - Story: Confirm the inter-switch link carries all four VLANs tagged — the office jacks (incl. pve-09) sit downstream of it. *(v5.4)*
 - Story: Edge-router VLAN interfaces + temporary DHCP scopes on 50/60.
-- Story: Static routes for the three LB pools → `192.168.40.1`.
+- Story: Static routes for the three LB pools → planned VyOS VIP `192.168.40.12` (verify unused first); UniFi remains the host gateway at `192.168.40.1`.
 - Story (verify): tagged test VM on pve-01(VLAN50)/pve-02(VLAN60)/**pve-09(VLAN50)** reaches edge + internet; delete test VMs. **The pve-09 case is the one that proves the office-jack trunk.**
 
 **Epic [0.3] VyOS BGP fabric** — `network`

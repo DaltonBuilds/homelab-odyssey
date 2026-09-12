@@ -46,7 +46,7 @@ If already installed from v3, skip to verification. Otherwise follow the v3 Phas
 
 - [ ] Download latest stable Proxmox VE ISO, flash to USB
 - [ ] Install Proxmox on the 1TB SSD, ext4 root filesystem (not ZFS — ZFS lives in the NFS VM only)
-- [ ] Set management IP: `192.168.40.55`, gateway **the actual existing UniFi VLAN 40 gateway**
+- [ ] Set management IP: `192.168.40.55`, gateway `192.168.40.1` (UniFi, confirmed)
 - [ ] Hostname: `pve-02`
 - [ ] Complete installation, reboot
 - [ ] Access UI from workstation: `https://192.168.40.55:8006`
@@ -60,7 +60,7 @@ If already installed from v3, skip to verification. Otherwise follow the v3 Phas
 Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacity plus the home of the relocated **`vault-02`** *(v5.4: decided — `mgmt-02` went to pve-09 instead, so the two relocated quorum nodes sit on different hosts. See ADR-011 and the resolved failure-domain note in Network Architecture.)*
 
 - [ ] Install Proxmox VE on the 1TB SSD, ext4 root
-- [ ] Management IP `192.168.40.58`, gateway **the actual existing UniFi VLAN 40 gateway**; hostname `pve-05`; apt update + dist-upgrade
+- [ ] Management IP `192.168.40.58`, gateway `192.168.40.1` (UniFi, confirmed); hostname `pve-05`; apt update + dist-upgrade
 - [ ] Configure `vmbr0` to accept trunked VLAN 40 (add VLAN 50 if you place a prod-tier VM here)
 - [ ] Upload Ubuntu Server 24.04 cloud image to local storage
 - [ ] DHCP reservation on the edge router
@@ -70,7 +70,7 @@ Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacit
 Each M920q hosts exactly **one** homelab-prod node VM (pve-06 → prod-cp-01, pve-07 → prod-w-01, pve-08 → prod-w-02), provisioned by OpenTofu in Phase 1.3 — one VM per box preserves the per-machine failure boundary the bare-metal layout had, while making the node reproducible and snapshottable.
 
 - [ ] Install Proxmox VE on each 512GB SSD, ext4 root (no ZFS — keeps host RAM overhead to ~1–1.5GB on these 16GB boxes)
-- [ ] Management IPs: `192.168.40.59` (pve-06), `192.168.40.64` (pve-07), `192.168.40.65` (pve-08), gateway **the actual existing UniFi VLAN 40 gateway**
+- [ ] Management IPs: `192.168.40.59` (pve-06), `192.168.40.64` (pve-07), `192.168.40.65` (pve-08), gateway `192.168.40.1` (UniFi, confirmed)
 - [ ] Hostnames `pve-06` / `pve-07` / `pve-08`; apt update + dist-upgrade
 - [ ] Configure `vmbr0` to accept trunked VLAN 50 (the homelab-prod cluster VLAN) — and VLAN 40 for the management interface
 - [ ] Upload Ubuntu Server 24.04 cloud image to local storage on each
@@ -92,7 +92,7 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 - [ ] Install Proxmox VE selecting **ZFS RAID1 (mirror)** across both 1TB NVMe sticks — **~900GB practically usable** after ZFS overhead. *(Deliberate exception to ADR-008's ext4-on-single-disk pattern; rationale and the full space budget are in ADR-011.)*
 - [ ] **Plan the space budget before provisioning VMs.** ~50GB Proxmox + 60GB `mgmt-02` + ~200GB build VM + 250GB `prod-gpu-01` leaves roughly 340GB for snapshots and the local model cache. This pool is adequate but not roomy — keep model weights on Garage/NFS with a bounded local cache, and size any future Garage replica here deliberately rather than assuming it's free
-- [ ] Management IP `192.168.40.66`, gateway **the actual existing UniFi VLAN 40 gateway**; hostname `pve-09`; apt update + dist-upgrade
+- [ ] Management IP `192.168.40.66`, gateway `192.168.40.1` (UniFi, confirmed); hostname `pve-09`; apt update + dist-upgrade
 - [ ] **Cap the ARC:** write `options zfs zfs_arc_max=10737418240` (10GB) to `/etc/modprobe.d/zfs.conf`, then `update-initramfs -u` and reboot. 64GB shared between `mgmt-02`, a build VM, `prod-gpu-01`, and an uncapped ARC will otherwise get tight
 - [ ] Configure `vmbr0` to accept trunked VLANs **40 and 50** (40 for `mgmt-02` and management, 50 for `prod-gpu-01`)
 - [ ] Upload the Ubuntu Server 24.04 cloud image **and** the Talos `metal-amd64.iso` (this host runs both a Talos mgmt node and Ubuntu-based RKE2/build VMs)
@@ -133,9 +133,9 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 - [ ] Create VLAN interfaces on the edge router for VLANs 50 and 60 (if not already present for 10/40)
 - [ ] Add temporary DHCP scopes on VLANs 50 and 60 (you'll replace with static cloud-init later; useful for first-boot testing)
 - [ ] Add static routes on edge router (these point at VyOS VRRP IP once it's up; for now, you can defer until Phase 0.3 is complete):
-  - `192.168.50.240/28 → 192.168.40.1`
-  - `192.168.60.240/28 → 192.168.40.1`
-  - `192.168.40.240/28 → 192.168.40.1`
+  - `192.168.50.240/28 → 192.168.40.12`
+  - `192.168.60.240/28 → 192.168.40.12`
+  - `192.168.40.240/28 → 192.168.40.12`
 
 #### Verification
 
@@ -162,7 +162,9 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 
 ### Phase 0.3: VyOS BGP Fabric
 
-**Goal:** Two VyOS routers running, peered with each other via iBGP, providing VRRP-managed gateway service for VLAN 40, ready to peer with Cilium speakers in Tier 2.
+**Goal:** Two VyOS routers running, peered with each other via iBGP, providing a VRRP next hop for the LoadBalancer routes on VLAN 40, ready to peer with Cilium speakers in Tier 2.
+
+**Confirmed gateway correction (2026-09-12):** UniFi owns `192.168.40.1`; the planned VyOS VLAN 40 VIP is now `192.168.40.12`. Before assigning .12, confirm it is unused in UniFi clients/reservations and exclude it from DHCP. Proxmox and platform guests retain UniFi as their gateway. Before deploying the VLAN 50/60 VRRP examples below, verify their .1 addresses are not already owned by UniFi; their ownership has not yet been confirmed.
 
 #### 0.3a — Provision both VyOS VMs
 
@@ -194,7 +196,7 @@ set interfaces ethernet eth0 vif 60 address '192.168.60.2/24'
 set high-availability vrrp group VLAN40 interface eth0.40
 set high-availability vrrp group VLAN40 vrid 40
 set high-availability vrrp group VLAN40 priority 200
-set high-availability vrrp group VLAN40 address 192.168.40.1/24
+set high-availability vrrp group VLAN40 address 192.168.40.12/24
 
 set high-availability vrrp group VLAN50 interface eth0.50
 set high-availability vrrp group VLAN50 vrid 50
@@ -206,8 +208,8 @@ set high-availability vrrp group VLAN60 vrid 60
 set high-availability vrrp group VLAN60 priority 200
 set high-availability vrrp group VLAN60 address 192.168.60.1/24
 
-# Default route to edge router (replace 192.168.40.254 with your actual edge IP)
-set protocols static route 0.0.0.0/0 next-hop 192.168.40.254
+# Default route to the confirmed UniFi VLAN 40 gateway
+set protocols static route 0.0.0.0/0 next-hop 192.168.40.1
 
 # BGP — own ASN 65000, iBGP peer to the other VyOS router
 set protocols bgp system-as 65000
@@ -242,9 +244,9 @@ For **bgp-02**, identical config but:
 - [ ] SSH to bgp-01: `show ip bgp summary` — confirms iBGP session to bgp-02 is `Established`
 - [ ] SSH to bgp-02: same
 - [ ] `show vrrp` on both — confirms bgp-01 is master, bgp-02 is backup for all three VRRP groups
-- [ ] From your workstation, `ping 192.168.40.1` succeeds (you're hitting the VRRP virtual IP)
-- [ ] Test failover: power off bgp-01 in Proxmox → bgp-02 becomes VRRP master within ~3 seconds → `ping 192.168.40.1` continues working. Power bgp-01 back on, master role returns to it.
-- [ ] Update pve-02's gateway from temporary edge IP to `192.168.40.1` (the VRRP IP)
+- [ ] From your workstation, `ping 192.168.40.12` succeeds (you're hitting the VRRP virtual IP)
+- [ ] Test failover: power off bgp-01 in Proxmox → bgp-02 becomes VRRP master within ~3 seconds → `ping 192.168.40.12` continues working. Power bgp-01 back on, master role returns to it.
+- [ ] Keep all Proxmox host gateways at `192.168.40.1` (UniFi); do not move them to the VyOS VIP.
 
 > **Blog note — VRRP vs ECMP:** A more sophisticated production setup uses ECMP with both routers active simultaneously rather than VRRP active/passive. For homelab scale, VRRP is dramatically simpler to reason about and the failover latency is acceptable. Document this tradeoff in an ADR — it's exactly the kind of "I considered X but chose Y because" reasoning interviewers probe.
 
@@ -976,14 +978,14 @@ You may not advance to Tier 1 until **every** item below passes.
 
 - [ ] All seven Proxmox hosts operational, accessible from workstation, joined to `homelab-pve` with healthy quorum and no HA-managed guests *(v5.4: pve-09 included — plus a healthy ZFS mirror and the GPU bound to `vfio-pci`)*
 - [ ] Both switches use the Phase 0.2 native/tagged port matrix; inter-switch links carry 10/40/50/60 (and 70 when used), with matching native VLAN settings. Test guest traffic through pve-09’s actual wall jack.
-- [ ] `ping 192.168.40.1` from workstation succeeds (VRRP virtual IP responds)
+- [ ] `ping 192.168.40.12` from workstation succeeds (VRRP virtual IP responds)
 
 #### BGP fabric
 
 - [ ] bgp-01 and bgp-02 both running on separate hypervisors
 - [ ] iBGP session between them is `Established`
 - [ ] VRRP failover test passes (kill master → backup takes over within 5 seconds → restore master → role returns)
-- [ ] Edge router has static routes for all three LB pools pointing to `192.168.40.1`
+- [ ] Edge router has static routes for all three LB pools pointing to `192.168.40.12`
 
 #### Vault HA
 

@@ -360,7 +360,7 @@ resource "proxmox_virtual_environment_vm" "this" {
     ip_config {
       ipv4 {
         address = "${var.ip_address}/24"
-        gateway = var.gateway   # The VRRP virtual IP from Tier 0 — 192.168.40.1, .50.1, etc.
+        gateway = var.gateway   # VLAN 40: confirmed UniFi 192.168.40.1; verify VLAN 50/60 gateway ownership before assigning
       }
     }
 

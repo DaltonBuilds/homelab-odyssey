@@ -210,3 +210,7 @@ That is adequate, not roomy, and it has two real consequences worth stating rath
 **Build procedure:** [Day-one Proxmox checklist](proxmox-day-one.md). Final hostname and management address must be set before joining. Seven members visible, healthy quorum, and laptop access after reboot define the day-one milestone; the rest of Tier 0 follows.
 
 **Sources:** [Proxmox cluster manager](https://github.com/proxmox/pve-docs/blob/master/pvecm.adoc), [UniFi port VLAN assignment](https://help.ui.com/hc/en-us/articles/26136855808919-Switch-Port-VLAN-Assignment-Trunk-Access-Ports).
+
+### ADR-012 addendum — Confirmed UniFi gateway (2026-09-12)
+
+The owner confirmed VLAN 40 gateway **192.168.40.1** belongs to UniFi. Proxmox and platform guests retain this gateway; DNS at .1 remains conditional on verifying the gateway DNS service. Reassign the planned VyOS VLAN 40 VRRP VIP to **192.168.40.12**, subject to a live availability/DHCP check before deployment. UniFi LoadBalancer routes point to .12; VyOS defaults upstream to .1. This replaces the former .1 VIP and unverified .254 upstream example. VLAN 50/60 gateway ownership remains a build-time check. Internal DNS forwarding targets the existing VyOS listeners .10/.11 rather than UniFi itself or an unbound routing VIP.

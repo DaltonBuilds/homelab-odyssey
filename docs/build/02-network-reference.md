@@ -6,7 +6,7 @@
 
 ## Network Architecture (Reference)
 
-**Current installation baseline (ADR-012):** seven members in `homelab-pve`; pve-03/pve-04 and .56/.57 are unused. All home networking equipment is UniFi. Follow the [day-one port matrix](proxmox-day-one.md) for native VLAN 40 on host-facing ports and tagged guest VLANs. The .1 gateways below are future VyOS VIPs, not verified current UniFi addresses. Keep the working UniFi gateway for host management and resolve any existing .1 ownership before configuring VRRP.
+**Current installation baseline (ADR-012):** seven members in `homelab-pve`; pve-03/pve-04 and .56/.57 are unused. All home networking equipment is UniFi. Follow the [day-one port matrix](proxmox-day-one.md) for native VLAN 40 on host-facing ports and tagged guest VLANs. The owner confirmed `192.168.40.1` is the UniFi gateway; retain it for Proxmox/platform routing and use it for DNS only after verifying DNS service. VyOS uses planned VIP `192.168.40.12` for LoadBalancer routes; confirm .12 is free and exclude it from DHCP before deployment. VLAN 50/60 gateway ownership still needs verification before assigning their planned VyOS VIPs.
 
 ### VLAN plan
 
@@ -48,7 +48,8 @@
 | pve-09 (Tower)      | 192.168.40.66   | 40   | Hypervisor 9 — GPU + build + mgmt-02 *(v5.4)* | Physical   |
 | bgp-01 (VyOS)           | 192.168.40.10   | 40   | BGP router, VRRP master                 | VM on pve-01    |
 | bgp-02 (VyOS)           | 192.168.40.11   | 40   | BGP router, VRRP backup                 | VM on pve-02    |
-| bgp-vrrp (virtual)     | 192.168.40.1    | 40   | VRRP virtual IP — VLAN 40 gateway       | Floats bgp-01↔bgp-02 |
+| UniFi gateway | 192.168.40.1 | 40 | Confirmed Proxmox/platform gateway; DNS if enabled | UniFi |
+| bgp-vrrp (virtual) | 192.168.40.12 | 40 | Planned VRRP next hop for LB routes; verify unused | Floats bgp-01↔bgp-02 |
 | vault-01 (Vault)       | 192.168.40.20   | 40   | Vault HA node 1 (Raft leader candidate) | VM on pve-01    |
 | vault-02 (Vault)       | 192.168.40.21   | 40   | Vault HA node 2                         | VM on **pve-05** *(v5.4: was pve-01)* |
 | vault-03 (Vault)       | 192.168.40.22   | 40   | Vault HA node 3                         | VM on pve-02    |
@@ -97,7 +98,7 @@
 | homelab-dev-lb-pool           | 192.168.60.240 – 192.168.60.250  | Cilium (homelab-dev)      | homelab-dev services         |
 | mgmt-lb-pool            | 192.168.40.240 – 192.168.40.250  | Cilium (homelab-mgmt) | homelab-mgmt services    |
 
-> **Edge router static routes:** Because most consumer/prosumer edge routers don't speak BGP, the edge gets static routes pointing each LB pool to `192.168.40.1` (the VRRP virtual IP). VyOS handles the rest. This keeps the BGP topology entirely internal.
+> **Edge router static routes:** Because most consumer/prosumer edge routers don't speak BGP, the edge gets static routes pointing each LB pool to `192.168.40.12` (the VRRP virtual IP). VyOS handles the rest. This keeps the BGP topology entirely internal.
 
 ---
 
