@@ -8,11 +8,11 @@ Accepted inventory and clustering decision: [ADR-012](01-adrs.md#adr-012--seven-
 | --- | --- | --- | --- |
 | pve-01 | M920 SFF, 64GB | 192.168.40.50/24 | 1TB, ext4 |
 | pve-02 | M920x #1, 32GB | 192.168.40.55/24 | 1TB, ext4 |
-| pve-05 | M920x #2, 32GB | 192.168.40.58/24 | 1TB, ext4 |
-| pve-06 | M920q #1, 16GB | 192.168.40.59/24 | 512GB, ext4 |
-| pve-07 | M920q #2, 16GB | 192.168.40.64/24 | 512GB, ext4 |
-| pve-08 | M920q #3, 16GB | 192.168.40.65/24 | 512GB, ext4 |
-| pve-09 | Ryzen tower, 64GB, RTX 5070 | 192.168.40.66/24 | Both 1TB NVMe, ZFS RAID1 |
+| pve-03 | M920x #2, 32GB | 192.168.40.58/24 | 1TB, ext4 |
+| pve-04 | M920q #1, 16GB | 192.168.40.59/24 | 512GB, ext4 |
+| pve-05 | M920q #2, 16GB | 192.168.40.64/24 | 512GB, ext4 |
+| pve-06 | M920q #3, 16GB | 192.168.40.65/24 | 512GB, ext4 |
+| pve-07 | Ryzen tower, 64GB, RTX 5070 | 192.168.40.66/24 | Both 1TB NVMe, ZFS RAID1 |
 
 The tower is the seventh machine. pve-03/pve-04 and .56/.57 are unused, not installation targets. Record MAC addresses, disk identities, and switch ports/wall jacks. Save passwords outside Git.
 
