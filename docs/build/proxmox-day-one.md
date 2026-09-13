@@ -2,7 +2,7 @@
 
 Accepted inventory and clustering decision: [ADR-012](01-adrs.md#adr-012--seven-confirmed-hosts-one-proxmox-cluster-unifi-bootstrap-2026-09-12). This checklist is the installation-day entry point; finish the remaining [Tier 0](tier-0-foundation.md) work afterward.
 
-**Build status (owner-reported 2026-09-13):** the six Lenovo hosts, pve-01 through pve-06, are installed and reachable. The Ryzen tower (pve-07) remains to be installed. Cluster membership and final acceptance checks are not yet confirmed.
+**Build status (owner-provided verification, 2026-09-13):** all seven hosts are installed. `pvecm status` confirms seven expected members/votes, quorum four, and `Quorate: Yes`; IPs match the inventory. On pve-07, two WD_BLACK SN850X 2000GB drives form an ONLINE `mirror-0` with zero read/write/checksum errors and no known data errors; `df -h` reports ~1.8TiB available on the fresh pool. Keep the current VM sizes (ADR-011). Other acceptance checks, including ARC limit and guest VLAN connectivity, remain separate.
 
 ## 1. Confirm labels and addresses
 
@@ -14,7 +14,7 @@ Accepted inventory and clustering decision: [ADR-012](01-adrs.md#adr-012--seven-
 | pve-04 | M920q #1, 16GB | 192.168.40.59/24 | 512GB, ext4 |
 | pve-05 | M920q #2, 16GB | 192.168.40.64/24 | 512GB, ext4 |
 | pve-06 | M920q #3, 16GB | 192.168.40.65/24 | 512GB, ext4 |
-| pve-07 | Ryzen tower, 64GB, RTX 5070 | 192.168.40.66/24 | Both 1TB NVMe, ZFS RAID1 |
+| pve-07 | Ryzen tower, 64GB, RTX 5070 | 192.168.40.66/24 | Both 2TB WD_BLACK SN850X NVMe, ZFS RAID1 |
 
 The tower is pve-07, the seventh machine. All names pve-01 through pve-07 are in use; addresses .56/.57 remain unused. Record MAC addresses, disk identities, and switch ports/wall jacks. Save passwords outside Git.
 

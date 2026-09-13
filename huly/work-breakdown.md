@@ -51,7 +51,7 @@ This document translates the build docs into Huly work items. It is the source y
 
 **Epic [0.1b] pve-07 — tower onboarding** — `proxmox`, `gpu` *(v5.4, ADR-011)*
 - Story: Pre-install hardware checks — matching NVMe models/capacity; both M.2 slots at full lanes with the 5070 populated; IOMMU/AMD-Vi + SVM enabled in UEFI; note NIC link speed. *(No data rescue needed — confirmed at planning time.)*
-- Story: Install Proxmox VE with **ZFS RAID1 mirror** across both 1TB NVMe (~900GB usable); IP `192.168.40.66`; hostname `pve-07`. Plan the space budget before provisioning VMs — the pool is adequate, not roomy.
+- Story: Install Proxmox VE with **ZFS RAID1 mirror** across both 2TB WD_BLACK SN850X NVMe (~1.8TiB usable); IP `192.168.40.66`; hostname `pve-07`. Verified 2026-09-13: matching SN850X 2000GB drives and ONLINE mirror with zero errors. Retain planned VM sizes and leave extra capacity uncommitted (ADR-011).
 - Story: Cap `zfs_arc_max` (~10GB) via `/etc/modprobe.d/zfs.conf` + `update-initramfs -u`; reboot. **The one step easiest to forget and most annoying to diagnose.**
 - Story: `vmbr0` trunk VLANs 40 + 50; upload Ubuntu cloud image **and** Talos `metal-amd64.iso`.
 - Story: GPU passthrough prep — `amd_iommu=on iommu=pt`, verify isolated IOMMU group, blacklist `nouveau`/`nvidia`, bind `vfio-pci`. **Do not install NVIDIA drivers on the host.**
@@ -163,7 +163,7 @@ Time-boxed `Spike` items — schedule opportunistically, not gated:
 - [Spike] OpenTofu state encryption
 - [Spike] Nix reproducible CI toolchain on ARC *(deferred by design)*
 - [Spike] vLLM serving runtime for KServe *(Tier 5-adjacent)* — **now has real hardware** (`prod-gpu-01`, RTX 5070 12GB on pve-07); scope it to quantized 7B–14B serving, and keep the `g5.xlarge` burst path for anything larger.
-- [Spike] **NAS / storage-tier relocation** — `storage`. Conditional. With the quorum concentration resolved in v5.4, the unreplicated `nfs-01` + `garage-01` on pve-01 is the **largest remaining single-host blast radius**. Two independently valuable smaller steps before a NAS exists: (a) Garage replica onto pve-07's mirror (an evening); (b) relocate `nfs-01` to pve-07. Gate the full relocation on the Tier 1 DR runbooks having been exercised once.
+- [Spike] **NAS / storage-tier relocation** — `storage`. Conditional. With the quorum concentration resolved in v5.4, the unreplicated `nfs-01` + `garage-01` on pve-01 is the **largest remaining single-host blast radius**. Deferred candidates: (a) evaluate a Garage replica on pve-07 after measuring object-storage needs and replication requirements; (b) evaluate NFS relocation separately. The verified ~1.8TiB mirror does not trigger either change now. Gate the full relocation on the Tier 1 DR runbooks having been exercised once.
 - [Spike] Papermill parameterized notebooks *(Tier 5-adjacent)*
 - [Spike] Backstage developer portal
 - [Spike] **IdP re-evaluation (authentik)** — `identity`. **Conditional — create the item but leave it `Backlog` with no estimate.** Only pull it forward if an ADR-009 trigger actually fires (day job leaves the defense path · Keycloak leaves CNCF or relicenses · oauth2-proxy toil outgrows a native proxy provider). First story is always "verify the portability contract held," which usually removes the urgency.

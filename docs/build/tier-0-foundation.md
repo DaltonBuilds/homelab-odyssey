@@ -78,22 +78,22 @@ Each M920q hosts exactly **one** homelab-prod node VM (pve-04 → prod-cp-01, pv
 - [ ] Upload Ubuntu Server 24.04 cloud image to local storage on each
 - [ ] DHCP reservations on the edge router for all three
 
-#### pve-07 (Tower — Ryzen 9 7900X, 64GB / 2× 1TB NVMe / RTX 5070) *(v5.4)*
+#### pve-07 (Tower — Ryzen 9 7900X, 64GB / 2× 2TB WD_BLACK SN850X NVMe / RTX 5070) *(v5.4)*
 
 The former home-office workstation, reassigned to the fleet (ADR-011). This is the fleet's only GPU host, only ZFS-root host, and the most capable single machine in the inventory. It carries three standing roles: `mgmt-02` (relocated quorum node), the amd64 build host, and — from Tier 5 — `prod-gpu-01`.
 
 **Pre-install (do these before flashing — order matters):**
 
 - [ ] Confirm nothing on the existing Fedora install is needed. *(Confirmed at planning time: nothing to rescue. Both NVMe sticks get wiped.)*
-- [ ] **Verify both NVMe sticks are the same model and capacity** — a ZFS mirror across mismatched sticks works but sizes to the smaller and inherits the slower one's write characteristics
+- [x] **Matching drives verified 2026-09-13:** two WD_BLACK SN850X 2000GB NVMes; owner-provided `lsblk` confirms both models and capacities.
 - [ ] **Verify both M.2 slots run at full lanes with the RTX 5070 populated.** On AM5, the second M.2 is often chipset-attached; a mirror across one CPU-attached and one chipset-attached slot is workable but caps mirror write throughput. Check the board manual's lane-sharing table — this is a "know it now" item, not a blocker
 - [ ] Enable **IOMMU / AMD-Vi** and **SVM** in UEFI; disable Secure Boot (or enroll keys) as required for the passthrough path
 - [ ] Note the onboard NIC's link speed (Ryzen 7000 boards commonly ship 2.5GbE). If it is 2.5GbE and the switch port is 1GbE, that ceiling matters later if a Garage replica or nfs-01 lands here
 
 **Install:**
 
-- [ ] Install Proxmox VE selecting **ZFS RAID1 (mirror)** across both 1TB NVMe sticks — **~900GB practically usable** after ZFS overhead. *(Deliberate exception to ADR-008's ext4-on-single-disk pattern; rationale and the full space budget are in ADR-011.)*
-- [ ] **Plan the space budget before provisioning VMs.** ~50GB Proxmox + 60GB `mgmt-02` + ~200GB build VM + 250GB `prod-gpu-01` leaves roughly 340GB for snapshots and the local model cache. This pool is adequate but not roomy — keep model weights on Garage/NFS with a bounded local cache, and size any future Garage replica here deliberately rather than assuming it's free
+- [ ] Install Proxmox VE selecting **ZFS RAID1 (mirror)** across both 2TB WD_BLACK SN850X NVMe sticks — **~1.8TiB practically usable** after ZFS overhead. *(Deliberate exception to ADR-008's ext4-on-single-disk pattern; rationale and the full space budget are in ADR-011.)*
+- [ ] **Retain the VM budget (ADR-011):** ~50GiB host allowance + 60GiB `mgmt-02` + 200GiB build VM + 250GiB `prod-gpu-01`. The verified ~1.8TiB mirror leaves roughly 1.2–1.3TiB uncommitted before future data and free-space reserve. Keep that headroom for snapshots, caches, and measured growth; defer extra standing storage services.
 - [ ] Management IP `192.168.40.66`, gateway `192.168.40.1` (UniFi, confirmed); hostname `pve-07`; apt update + dist-upgrade
 - [ ] **Cap the ARC:** write `options zfs zfs_arc_max=10737418240` (10GB) to `/etc/modprobe.d/zfs.conf`, then `update-initramfs -u` and reboot. 64GB shared between `mgmt-02`, a build VM, `prod-gpu-01`, and an uncapped ARC will otherwise get tight
 - [ ] Configure `vmbr0` to accept trunked VLANs **40 and 50** (40 for `mgmt-02` and management, 50 for `prod-gpu-01`)

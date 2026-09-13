@@ -88,7 +88,7 @@
 > | pve-07 | unaffected | 2 of 3 — **quorum holds** | prod-gpu-01 + build host down (no platform impact) |
 > | pve-02 | 2 of 3 — **quorum holds** | 2 of 3 — **quorum holds** | homelab-dev entirely down; bgp-02 down |
 >
-> **What remains accepted, deliberately.** Storage is still a single point of failure: nfs-01 and garage-01 both live on pve-01 and neither is replicated, so a pve-01 loss is a storage outage even though both quorums survive it. This is fine for a lab — the Phase 1.11 snapshot DR covers the data — but it is now the *largest* remaining single-host blast radius, and pve-07's mirror is the obvious future home for a Garage replica or a relocated nfs-01 (ADR-011 role 4). Note the constraint, though: that mirror is **~900GB usable** (2× 1TB), most of it already budgeted to VM disks, so a replica there competes with snapshots and the model cache and must be sized deliberately. Revisit if a NAS is acquired.
+> **What remains accepted, deliberately.** Storage is still a single point of failure: nfs-01 and garage-01 both live on pve-01 and neither is replicated, so a pve-01 loss is a storage outage even though both quorums survive it. This is fine for a lab — the Phase 1.11 snapshot DR covers the data — but it is now the *largest* remaining single-host blast radius, and pve-07's mirror is the obvious future home for a Garage replica or a relocated nfs-01 (ADR-011 role 4). The mirror is now verified as **2×2TB WD_BLACK SN850X, ~1.8TiB usable** (2026-09-13). Existing VM sizes and placements remain unchanged. Additional headroom makes a future Garage replica more practical, but evaluate it after measuring real object-storage needs; NFS relocation and a NAS remain deferred decisions.
 
 ### LoadBalancer pools (BGP-advertised)
 
