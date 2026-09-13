@@ -41,17 +41,17 @@ This document translates the build docs into Huly work items. It is the source y
 ### Capability: Hypervisor & Network Fabric
 
 **Epic [0.1] Proxmox on all physical hypervisors** — `proxmox`
-- Story: Install Proxmox VE (ext4 root) on pve-01, pve-02, pve-05, pve-06, pve-07, and pve-08. Tasks: one per host (pve-05 M920x #2; pve-06/07/08 M920q).
+- Story: Install Proxmox VE (ext4 root) on pve-01, pve-02, pve-03, pve-04, pve-05, and pve-06. Tasks: one per host (pve-03 M920x #2; pve-04/05/06 M920q).
 - Story: Set management IPs + hostnames + `apt dist-upgrade` on all hosts.
-- Story: Configure `vmbr0` VLAN trunks per host (VLAN 50 on pve-06/07/08 **+ pve-09**; VLAN 70 on a capacity-checked existing host).
+- Story: Configure `vmbr0` VLAN trunks per host (VLAN 50 on pve-04/05/06 **+ pve-07**; VLAN 70 on a capacity-checked existing host).
 - Story: Create `homelab-pve` on pve-01 and join the other six empty hosts before guest creation; reconcile node-local storage and cluster-wide guest IDs. Follow the [day-one checklist](../docs/build/proxmox-day-one.md).
 - Story: Configure UniFi native VLAN 40 on host ports and tagged guest VLANs per the day-one matrix; preserve existing gateway/DNS access.
 - Story: Upload Ubuntu 24.04 cloud image + VyOS/Talos ISOs to the relevant pools.
 - Story (verify): all seven web UIs reachable; all seven members visible from one UI; quorum healthy; no HA-managed guests.
 
-**Epic [0.1b] pve-09 — tower onboarding** — `proxmox`, `gpu` *(v5.4, ADR-011)*
+**Epic [0.1b] pve-07 — tower onboarding** — `proxmox`, `gpu` *(v5.4, ADR-011)*
 - Story: Pre-install hardware checks — matching NVMe models/capacity; both M.2 slots at full lanes with the 5070 populated; IOMMU/AMD-Vi + SVM enabled in UEFI; note NIC link speed. *(No data rescue needed — confirmed at planning time.)*
-- Story: Install Proxmox VE with **ZFS RAID1 mirror** across both 1TB NVMe (~900GB usable); IP `192.168.40.66`; hostname `pve-09`. Plan the space budget before provisioning VMs — the pool is adequate, not roomy.
+- Story: Install Proxmox VE with **ZFS RAID1 mirror** across both 1TB NVMe (~900GB usable); IP `192.168.40.66`; hostname `pve-07`. Plan the space budget before provisioning VMs — the pool is adequate, not roomy.
 - Story: Cap `zfs_arc_max` (~10GB) via `/etc/modprobe.d/zfs.conf` + `update-initramfs -u`; reboot. **The one step easiest to forget and most annoying to diagnose.**
 - Story: `vmbr0` trunk VLANs 40 + 50; upload Ubuntu cloud image **and** Talos `metal-amd64.iso`.
 - Story: GPU passthrough prep — `amd_iommu=on iommu=pt`, verify isolated IOMMU group, blacklist `nouveau`/`nvidia`, bind `vfio-pci`. **Do not install NVIDIA drivers on the host.**
@@ -60,10 +60,10 @@ This document translates the build docs into Huly work items. It is the source y
 
 **Epic [0.2] Switch / VLAN configuration** — `network`
 - Story: Trunk VLANs 10/40/50/60 (+70 to ephemeral hosts) to every hypervisor uplink + workstation, **on both UniFi switches**.
-- Story: Confirm the inter-switch link carries all four VLANs tagged — the office jacks (incl. pve-09) sit downstream of it. *(v5.4)*
+- Story: Confirm the inter-switch link carries all four VLANs tagged — the office jacks (incl. pve-07) sit downstream of it. *(v5.4)*
 - Story: Edge-router VLAN interfaces + temporary DHCP scopes on 50/60.
 - Story: Static routes for the three LB pools → planned VyOS VIP `192.168.40.12` (verify unused first); UniFi remains the host gateway at `192.168.40.1`.
-- Story (verify): tagged test VM on pve-01(VLAN50)/pve-02(VLAN60)/**pve-09(VLAN50)** reaches edge + internet; delete test VMs. **The pve-09 case is the one that proves the office-jack trunk.**
+- Story (verify): tagged test VM on pve-01(VLAN50)/pve-02(VLAN60)/**pve-07(VLAN50)** reaches edge + internet; delete test VMs. **The pve-07 case is the one that proves the office-jack trunk.**
 
 **Epic [0.3] VyOS BGP fabric** — `network`
 - Story: Provision bgp-01 (pve-01) + bgp-02 (pve-02) from VyOS ISO (UI, not Terraform); snapshot after install.
@@ -74,7 +74,7 @@ This document translates the build docs into Huly work items. It is the source y
 ### Capability: Secrets Substrate (OpenBao)
 
 **Epic [0.4] OpenBao VM provisioning (bootstrap mode)** — `openbao`
-- Story: Hand-create vault-01 (pve-01) + **vault-02 (pve-05)** + vault-03 (pve-02) from Ubuntu ISO, cloud-init (static IP, SSH key, no password auth). *(v5.4: vault-02 moved off pve-01 per ADR-011 — no hypervisor hosts two Raft nodes.)*
+- Story: Hand-create vault-01 (pve-01) + **vault-02 (pve-03)** + vault-03 (pve-02) from Ubuntu ISO, cloud-init (static IP, SSH key, no password auth). *(v5.4: vault-02 moved off pve-01 per ADR-011 — no hypervisor hosts two Raft nodes.)*
 - Story: Baseline hardening — disable swap, sshd hardening, chrony, host firewall (SSH + Vault API from VLAN 40 only).
 - Story: Install pinned OpenBao 2.6.x `.deb` on all three; service present, not yet enabled.
 
@@ -162,8 +162,8 @@ Time-boxed `Spike` items — schedule opportunistically, not gated:
 - [Spike] OpenBao namespaces exploration
 - [Spike] OpenTofu state encryption
 - [Spike] Nix reproducible CI toolchain on ARC *(deferred by design)*
-- [Spike] vLLM serving runtime for KServe *(Tier 5-adjacent)* — **now has real hardware** (`prod-gpu-01`, RTX 5070 12GB on pve-09); scope it to quantized 7B–14B serving, and keep the `g5.xlarge` burst path for anything larger.
-- [Spike] **NAS / storage-tier relocation** — `storage`. Conditional. With the quorum concentration resolved in v5.4, the unreplicated `nfs-01` + `garage-01` on pve-01 is the **largest remaining single-host blast radius**. Two independently valuable smaller steps before a NAS exists: (a) Garage replica onto pve-09's mirror (an evening); (b) relocate `nfs-01` to pve-09. Gate the full relocation on the Tier 1 DR runbooks having been exercised once.
+- [Spike] vLLM serving runtime for KServe *(Tier 5-adjacent)* — **now has real hardware** (`prod-gpu-01`, RTX 5070 12GB on pve-07); scope it to quantized 7B–14B serving, and keep the `g5.xlarge` burst path for anything larger.
+- [Spike] **NAS / storage-tier relocation** — `storage`. Conditional. With the quorum concentration resolved in v5.4, the unreplicated `nfs-01` + `garage-01` on pve-01 is the **largest remaining single-host blast radius**. Two independently valuable smaller steps before a NAS exists: (a) Garage replica onto pve-07's mirror (an evening); (b) relocate `nfs-01` to pve-07. Gate the full relocation on the Tier 1 DR runbooks having been exercised once.
 - [Spike] Papermill parameterized notebooks *(Tier 5-adjacent)*
 - [Spike] Backstage developer portal
 - [Spike] **IdP re-evaluation (authentik)** — `identity`. **Conditional — create the item but leave it `Backlog` with no estimate.** Only pull it forward if an ADR-009 trigger actually fires (day job leaves the defense path · Keycloak leaves CNCF or relicenses · oauth2-proxy toil outgrows a native proxy provider). First story is always "verify the portability contract held," which usually removes the urgency.

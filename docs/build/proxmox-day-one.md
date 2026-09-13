@@ -2,6 +2,8 @@
 
 Accepted inventory and clustering decision: [ADR-012](01-adrs.md#adr-012--seven-confirmed-hosts-one-proxmox-cluster-unifi-bootstrap-2026-09-12). This checklist is the installation-day entry point; finish the remaining [Tier 0](tier-0-foundation.md) work afterward.
 
+**Build status (owner-reported 2026-09-13):** the six Lenovo hosts, pve-01 through pve-06, are installed and reachable. The Ryzen tower (pve-07) remains to be installed. Cluster membership and final acceptance checks are not yet confirmed.
+
 ## 1. Confirm labels and addresses
 
 | Host | Physical machine | Static management address | Root storage |
@@ -14,7 +16,7 @@ Accepted inventory and clustering decision: [ADR-012](01-adrs.md#adr-012--seven-
 | pve-06 | M920q #3, 16GB | 192.168.40.65/24 | 512GB, ext4 |
 | pve-07 | Ryzen tower, 64GB, RTX 5070 | 192.168.40.66/24 | Both 1TB NVMe, ZFS RAID1 |
 
-The tower is the seventh machine. pve-03/pve-04 and .56/.57 are unused, not installation targets. Record MAC addresses, disk identities, and switch ports/wall jacks. Save passwords outside Git.
+The tower is pve-07, the seventh machine. All names pve-01 through pve-07 are in use; addresses .56/.57 remain unused. Record MAC addresses, disk identities, and switch ports/wall jacks. Save passwords outside Git.
 
 ## 2. Prepare UniFi before relying on remote access
 
@@ -27,11 +29,11 @@ The tower is the seventh machine. pve-03/pve-04 and .56/.57 are unused, not inst
 | --- | --- | --- |
 | pve-01 and pve-02 | 40 | 50, 60 (both will host VyOS routers) |
 | pve-03 | 40 | None initially |
-| pve-04, pve-05 | 40 | 50 |
+| pve-04, pve-05, pve-06, pve-07 | 40 | 50 |
 | Selected ephemeral host, when needed | 40 | Add 70 to that host's existing list |
 
 - [ ] Carry 10/40/50/60 across the switch-to-switch and gateway uplinks; add 70 end to end before using it. Keep uplink native VLANs consistent and preserve the existing management network for switches/APs. A host-facing native-40 profile must not be blindly applied to every uplink or AP port.
-- [ ] Verify the actual upstream port serving pve-09's wall jack. Confirm the documented two-switch layout against physical cabling.
+- [ ] Verify the actual upstream port serving pve-07's wall jack. Confirm the documented two-switch layout against physical cabling.
 - [ ] Permit member-to-member TCP 22 and 8006 and UDP 5405–5412 on the trusted management network. Verify reliable wired connectivity and low latency; schedule bulk transfers so they do not starve Corosync. A dedicated physical cluster NIC is the recommended future improvement if available.
 
 Native VLAN 40 means the host sends management traffic untagged. The management IP belongs on vmbr0, not vmbr0.40. Guest NICs for VLAN 50/60/70 use the corresponding Proxmox VLAN tag. A VLAN-40 guest can use an untagged NIC with this bridge setup. VyOS trunk NICs need deliberate guest-side tagging as described in Phase 0.3; do not combine a Proxmox access tag with duplicate guest subinterface tagging.
@@ -40,13 +42,13 @@ Native VLAN 40 means the host sends management traffic untagged. The management 
 
 - [ ] Start with pve-01; preserve an existing usable installation if present. Confirm data backups before erasing any disk. Check the official ISO checksum and successful USB validation.
 - [ ] Enable VT-x/SVM and VT-d/IOMMU in firmware; boot the USB in UEFI mode. Use Terminal UI if graphical installation fails.
-- [ ] Select the correct internal disks and filesystem from the table. Only pve-09 uses ZFS RAID1, across both NVMes.
+- [ ] Select the correct internal disks and filesystem from the table. Only pve-07 uses ZFS RAID1, across both NVMes.
 - [ ] Enter America/Denver, notification email, and a stored root password. Use the final FQDN, e.g. pve-01.homelab.internal, static /24 address, existing working gateway, and DNS resolver.
 - [ ] Remove USB and reboot. From the laptop open https://192.168.40.50:8006 (substitute each host IP); verify the expected host before accepting the initial self-signed certificate. Log in as root with Linux PAM authentication.
 - [ ] Verify browser shell and SSH. Under System → Network, confirm vmbr0 uses the connected physical NIC, carries the host IP/default gateway, and is VLAN aware. Keep console access during changes.
 - [ ] Configure appropriate package repositories in the UI: enterprise with subscription, otherwise disable subscription-only entries and enable No-Subscription. Disable unused subscription-only Ceph entries. Run apt update and apt dist-upgrade, review the transaction, then reboot. Bring every member to the same Proxmox version before joining.
 - [ ] Check hostname -f, ip -br address, ip route, timedatectl, and pveversion -v. Confirm DNS resolution and synchronized clocks. Verify UI and SSH access after reboot before repeating on the next machine.
-- [ ] On pve-09 verify zpool status shows an ONLINE two-disk mirror. Apply the documented ARC limit and verify it after reboot. GPU binding/passthrough can wait until remote access works; it is not part of this day's acceptance gate.
+- [ ] On pve-07 verify zpool status shows an ONLINE two-disk mirror. Apply the documented ARC limit and verify it after reboot. GPU binding/passthrough can wait until remote access works; it is not part of this day's acceptance gate.
 
 ### Optional post-install helper
 
@@ -62,6 +64,19 @@ For this lab, without a subscription: disable enterprise, enable/keep No-Subscri
 
 Verify update results: the script can print completion after an APT failure. Check `apt update`, `pveversion -v`, rebooted UI access, and `pvecm status` after joining. Successful helper execution does not replace the acceptance checks.
 
+### APT update fails with enterprise 401 Unauthorized
+
+Observed on pve-01 on 2026-09-13: the No-Subscription repository succeeds, but `https://enterprise.proxmox.com/debian/pve` returns 401. The enterprise repository requires a valid subscription; the subsequent “not signed” error follows the failed fetch.
+
+1. In the host UI, open **Updates → Repositories** (or the node’s Repositories entry).
+2. Select the row whose URI is `https://enterprise.proxmox.com/debian/pve` and click **Disable**. Disable every enabled duplicate of this entry if present.
+3. Keep the existing `http://download.proxmox.com/debian/pve` / `pve-no-subscription` entry enabled; do not add a duplicate. The successful `ceph-tentacle` No-Subscription fetch in this log is not the cause of the 401.
+4. Run `apt update` in the host shell. It must complete without repository errors before proceeding with `apt dist-upgrade`. Repeat repository configuration on each physical host; it is node-local even after clustering.
+
+CLI alternative: inspect `/etc/apt/sources.list.d/pve-enterprise.sources` and set **Enabled: no** in the enterprise stanza (replace an existing Enabled field rather than duplicating it). If a helper put the stanza in another `.sources` file, edit that file instead. For a legacy `.list` entry, comment out its enterprise `deb` line. Leave Debian security and No-Subscription sources enabled. Do not disable signature checking or add `trusted=yes` to work around the authentication failure.
+
+Reference: [Proxmox package repositories](https://github.com/proxmox/pve-docs/blob/master/pve-package-repos.adoc). Disabling the subscription reminder in the UI does not disable the enterprise APT repository.
+
 ### Physical-link troubleshooting and installation notes
 
 If a new host is unreachable, run `ip -br address` at its local console. A DOWN interface warrants checking its administrative state, cable, link lights, and actual switch port before changing VLANs. Trace host → patch panel → switch; adjacent panel and switch numbers do not guarantee matching connections.
@@ -74,7 +89,7 @@ If a new host is unreachable, run `ip -br address` at its local console. A DOWN 
 - [ ] On pve-01: Datacenter → Cluster → Create Cluster; name **homelab-pve**; select 192.168.40.50 as Link 0. Final names and management IPs must already be correct.
 - [ ] Copy Join Information. On each other empty host: Datacenter → Cluster → Join Cluster; paste the information, authenticate to the existing member, verify its fingerprint, and select the joining host's VLAN 40 management address for Link 0.
 - [ ] Reload after the certificate/session changes. Verify membership before joining the next host. Joining replaces /etc/pve configuration; if a joining host already has guests, back them up and plan their restore with unique IDs before proceeding.
-- [ ] Under Datacenter → Storage, restrict local-lvm to pve-01/02/05/06/07/08 and add/reconcile local-zfs for pve-09 using its actual rpool/data dataset. Verify local storage on each host. Shared storage configuration does not make local disks shared; do not mark them Shared.
+- [ ] Under Datacenter → Storage, restrict local-lvm to pve-01/02/03/04/05/06 and add/reconcile local-zfs for pve-07 using its actual rpool/data dataset. Verify local storage on each host. Shared storage configuration does not make local disks shared; do not mark them Shared.
 - [ ] Allocate VM/CT IDs uniquely across the entire cluster. Keep planned workload placement; configure no HA resources and no Ceph for this milestone. Joining hosts does not enable automatic guest failover.
 - [ ] On completion, pvecm status must show Nodes: 7, Expected votes: 7, Quorum: 4, Quorate: Yes. Confirm all seven members appear through pve-01's UI and another member's UI.
 
@@ -84,9 +99,9 @@ Seven equal-vote members need four communicating votes. Loss of quorum restricts
 
 - [ ] All seven hosts boot without the USB and remain reachable from the laptop after individual reboots.
 - [ ] One member's UI manages all seven; a second member's UI works as an alternate entry point.
-- [ ] Cluster quorum, DNS, time synchronization, package updates, and pve-09's mirror are healthy.
+- [ ] Cluster quorum, DNS, time synchronization, package updates, and pve-07's mirror are healthy.
 - [ ] Record switch ports, MACs, hostnames, IPs, and versions; save bookmarks and credentials securely.
-- [ ] Before production guest use, test VLAN 50 on pve-01 and pve-09 and VLAN 60 on pve-02 using disposable guests with unique IDs. Test VLAN 70 when first configured. Management reachability alone does not prove guest VLAN paths.
+- [ ] Before production guest use, test VLAN 50 on pve-01 and pve-07 and VLAN 60 on pve-02 using disposable guests with unique IDs. Test VLAN 70 when first configured. Management reachability alone does not prove guest VLAN paths.
 
 Continue with Tier 0's guest-network tests, images, Huly, VyOS, OpenBao, and GPU preparation. Those are separate from this day-one completion gate.
 

@@ -1,6 +1,6 @@
 [← Docs index](../README.md) · **Operation Long Haul v5**
 
-**Proxmox cluster baseline (ADR-012):** all seven hosts share `homelab-pve`. Keep explicit target-node placement, use cluster-wide unique VM/CT IDs, and reconcile cluster-scoped users/tokens once. Existing endpoint examples can target different members of the same cluster; local storage is still node-specific (`local-lvm` on ext4 hosts, `local-zfs` on pve-09).
+**Proxmox cluster baseline (ADR-012):** all seven hosts share `homelab-pve`. Keep explicit target-node placement, use cluster-wide unique VM/CT IDs, and reconcile cluster-scoped users/tokens once. Existing endpoint examples can target different members of the same cluster; local storage is still node-specific (`local-lvm` on ext4 hosts, `local-zfs` on pve-07).
 
 [← Tier 0 · Foundation](tier-0-foundation.md)  ·  [Tier 2 · Platform Services →](tier-2-platform-services.md)
 
@@ -16,14 +16,14 @@
 - Terraform reads its provider credentials from Vault at runtime — no `terraform.tfvars` with secrets, no env vars set by hand
 - Ansible authenticates to Vault via AppRole — no `ansible-vault` encrypted files, no `--ask-vault-pass`
 - RKE2 replaces k3s with CIS profile mode enabled, secrets encryption-at-rest in etcd, and a real audit policy
-- Three clusters instead of two: **homelab-prod** (prod, all VMs — one per M920q on pve-06/07/08 plus prod-w-03 on pve-01), **homelab-dev** (dev/staging, all VMs on M920x), **homelab-mgmt** upgraded from 1-node k3s to 3-node Talos HA *(v5; v5.2: prod is no longer bare metal — ADR-008)*
+- Three clusters instead of two: **homelab-prod** (prod, all VMs — one per M920q on pve-04/05/06 plus prod-w-03 on pve-01), **homelab-dev** (dev/staging, all VMs on M920x), **homelab-mgmt** upgraded from 1-node k3s to 3-node Talos HA *(v5; v5.2: prod is no longer bare metal — ADR-008)*
 - Hosts enroll with Vault SSH OTP for privileged operations (deferred config from Phase 0.9 lands here)
 
 ## Tier 1 Phases
 
 - **1.1** — Terraform refactor: Vault-authenticated provider chain
 - **1.2** — Ansible refactor: Vault lookups replace `ansible-vault`
-- **1.3** — VM provisioning via Terraform (all workload + mgmt VMs, **including all four homelab-prod nodes** — v5.2 — **plus `prod-gpu-01` on pve-09** — v5.4)
+- **1.3** — VM provisioning via Terraform (all workload + mgmt VMs, **including all four homelab-prod nodes** — v5.2 — **plus `prod-gpu-01` on pve-07** — v5.4)
 - **1.4** — *Removed (v5.2).* Formerly baremetal preparation for the 3 prod nodes; now that they are Proxmox VMs, they are provisioned in 1.3 and configured by the same Ansible/hardening path as every other host. Section retained as a stub for traceability.
 - **1.5** — OS hardening playbook (CIS-adjacent baseline, all hosts)
 - **1.6** — Vault SSH OTP enrollment (`vault-ssh-helper` everywhere)
@@ -59,7 +59,7 @@ homelab-terraform/
 │       └── ...
 └── environments/
     ├── platform/                        # vault-01/02/03 handled in Tier 0; this dir starts empty in Tier 1
-    ├── homelab-prod/                      # all 4 prod VMs: prod-cp-01/w-01/w-02 (pve-06/07/08) + prod-w-03 (pve-01)
+    ├── homelab-prod/                      # all 4 prod VMs: prod-cp-01/w-01/w-02 (pve-04/05/06) + prod-w-03 (pve-01)
     │   ├── main.tf
     │   ├── variables.tf
     │   └── backend.tf
@@ -203,7 +203,7 @@ homelab-ansible/
 ├── inventories/
 │   ├── platform/                       # Vault VMs (vault-01/02/03) — already configured in Tier 0
 │   ├── storage/                        # nfs-01, garage-01
-│   ├── homelab-prod/                     # VMs: prod-cp-01, prod-w-01, prod-w-02 (pve-06/07/08), prod-w-03 (pve-01)
+│   ├── homelab-prod/                     # VMs: prod-cp-01, prod-w-01, prod-w-02 (pve-04/05/06), prod-w-03 (pve-01)
 │   ├── homelab-dev/                          # VMs: dev-cp-01, dev-w-01, dev-w-02
 │   └── mgmt/                           # VMs: mgmt-01, mgmt-02, mgmt-03
 ├── group_vars/
@@ -313,7 +313,7 @@ bao kv put secret/ansible/github-deploy-key \
 
 ### Phase 1.3: VM Provisioning via Terraform
 
-**Goal:** All Tier 1 VMs (storage, homelab-mgmt, homelab-dev workers, and **all four homelab-prod nodes** — v5.2 — **plus `prod-gpu-01` on pve-09, provisioned here but joined in Tier 5** — v5.4) created via Terraform with cloud-init bootstrap. Reproducible, version-controlled, Vault-authenticated.
+**Goal:** All Tier 1 VMs (storage, homelab-mgmt, homelab-dev workers, and **all four homelab-prod nodes** — v5.2 — **plus `prod-gpu-01` on pve-07, provisioned here but joined in Tier 5** — v5.4) created via Terraform with cloud-init bootstrap. Reproducible, version-controlled, Vault-authenticated.
 
 #### 1.3a — Reusable VM module (`modules/proxmox-vm`)
 
@@ -388,20 +388,20 @@ resource "proxmox_virtual_environment_vm" "this" {
 
 #### 1.3b — Environment: homelab-prod (all four nodes) *(v5.2)*
 
-Before v5.2 this env provisioned only prod-w-03 (the sole prod VM); the three M920q were bare metal. Now every prod node is a VM: prod-cp-01/w-01/w-02 each get a dedicated M920q host (pve-06/07/08 — one VM per box), and prod-w-03 stays on pve-01. Each M920q VM takes ~14GB of its host's 16GB, leaving ~1.5GB for the ext4 Proxmox host.
+Before v5.2 this env provisioned only prod-w-03 (the sole prod VM); the three M920q were bare metal. Now every prod node is a VM: prod-cp-01/w-01/w-02 each get a dedicated M920q host (pve-04/05/06 — one VM per box), and prod-w-03 stays on pve-01. Each M920q VM takes ~14GB of its host's 16GB, leaving ~1.5GB for the ext4 Proxmox host.
 
 ```hcl
 # environments/homelab-prod/main.tf
 locals {
   homelab_prod_nodes = {
-    prod-cp-01 = { node = "pve-06", ip = "192.168.50.30", role = "control-plane", cpu = 4, mem = 14336, disk = 200 }
-    prod-w-01   = { node = "pve-07", ip = "192.168.50.31", role = "worker",        cpu = 4, mem = 14336, disk = 200 }
-    prod-w-02   = { node = "pve-08", ip = "192.168.50.32", role = "worker",        cpu = 4, mem = 14336, disk = 200 }
+    prod-cp-01 = { node = "pve-04", ip = "192.168.50.30", role = "control-plane", cpu = 4, mem = 14336, disk = 200 }
+    prod-w-01   = { node = "pve-05", ip = "192.168.50.31", role = "worker",        cpu = 4, mem = 14336, disk = 200 }
+    prod-w-02   = { node = "pve-06", ip = "192.168.50.32", role = "worker",        cpu = 4, mem = 14336, disk = 200 }
     prod-w-03   = { node = "pve-01", ip = "192.168.50.33", role = "worker",        cpu = 4, mem = 8192,  disk = 80  }  # shares the busy 64GB pve-01
     # v5.4 (ADR-011) — GPU worker on the tower. Provisioned here; the GPU is not
     # attached and the node is not joined to the cluster until Tier 5. Tainted on
     # join so nothing schedules here by accident.
-    prod-gpu-01 = { node = "pve-09", ip = "192.168.50.34", role = "worker",        cpu = 8, mem = 32768, disk = 250 }
+    prod-gpu-01 = { node = "pve-07", ip = "192.168.50.34", role = "worker",        cpu = 8, mem = 32768, disk = 250 }
   }
 }
 
@@ -433,9 +433,9 @@ module "homelab_prod_node" {
 
 > **One VM per M920q — why not pack more?** Keeping a single prod node per physical box preserves the failure boundary the bare-metal layout had (one hardware failure = one lost K8s node, which the cluster tolerates) while gaining reproducibility, snapshots, and noVNC console. Bin-packing multiple prod nodes onto one M920q would reintroduce a correlated-failure domain — don't.
 
-> **`prod-gpu-01` sizing and staging *(v5.4 — ADR-011)*.** It gets 8 vCPU / 32GB / **250GB**. The disk is deliberately modest: pve-09's mirror yields only **~900GB usable** (2× 1TB, mirrored), which after Proxmox (~50GB), `mgmt-02` (60GB), and the build VM (~200GB) leaves roughly 340GB for snapshots *and* the local model cache. So **model weights live on Garage/NFS with a bounded local cache**, not staged wholesale on this VM's disk — 250GB is sized for the OS, container images, and a working cache. If model-serving genuinely needs more local NVMe, that is the signal to add disks or a NAS (see [Future Upgrades](future-upgrades.md)), not to grow this VM until the pool is full. Two staging rules:
+> **`prod-gpu-01` sizing and staging *(v5.4 — ADR-011)*.** It gets 8 vCPU / 32GB / **250GB**. The disk is deliberately modest: pve-07's mirror yields only **~900GB usable** (2× 1TB, mirrored), which after Proxmox (~50GB), `mgmt-02` (60GB), and the build VM (~200GB) leaves roughly 340GB for snapshots *and* the local model cache. So **model weights live on Garage/NFS with a bounded local cache**, not staged wholesale on this VM's disk — 250GB is sized for the OS, container images, and a working cache. If model-serving genuinely needs more local NVMe, that is the signal to add disks or a NAS (see [Future Upgrades](future-upgrades.md)), not to grow this VM until the pool is full. Two staging rules:
 >
-> 1. **The GPU is not attached at this phase.** Provision the VM here with the rest of the fleet, but add the `hostpci0` passthrough entry and join the node to the cluster in Tier 5. Roles 1–2 of pve-09 (`mgmt-02`, build host) do not need the GPU and should not wait on it.
+> 1. **The GPU is not attached at this phase.** Provision the VM here with the rest of the fleet, but add the `hostpci0` passthrough entry and join the node to the cluster in Tier 5. Roles 1–2 of pve-07 (`mgmt-02`, build host) do not need the GPU and should not wait on it.
 > 2. **Taint on join** so the general workload pool never lands here:
 >
 > ```yaml
@@ -497,7 +497,7 @@ module "homelab_dev_node" {
 locals {
   homelab_mgmt_nodes = {
     mgmt-01     = { ip = "192.168.40.60", proxmox = "pve-01", cpu = 4, mem = 6144, disk = 60 }
-    mgmt-02  = { ip = "192.168.40.61", proxmox = "pve-09", cpu = 4, mem = 6144, disk = 60 }  # v5.4: was pve-01 (ADR-011)
+    mgmt-02  = { ip = "192.168.40.61", proxmox = "pve-07", cpu = 4, mem = 6144, disk = 60 }  # v5.4: was pve-01 (ADR-011)
     mgmt-03   = { ip = "192.168.40.62", proxmox = "pve-02", cpu = 4, mem = 6144, disk = 60 }
   }
 }
@@ -526,9 +526,9 @@ module "mgmt_node" {
 
 > **v5 — these are Talos nodes.** They are provisioned as VMs here but configured declaratively in Phase 1.10 via `talosctl`, not by Ansible. They have no SSH, are excluded from `roles/hardening` (1.5) and Vault SSH OTP (1.6), and carry no cloud-init OS user.
 
-> **HA topology *(rewritten in v5.4 — ADR-011)*.** The three mgmt nodes sit on **three different hypervisors**: `mgmt-01` → pve-01, `mgmt-02` → **pve-09**, `mgmt-03` → pve-02. Any single hypervisor loss leaves 2 of 3 alive and etcd keeps quorum. This is already set in the `homelab_mgmt_nodes` map above — note the key there is `proxmox`, not `node` as in the homelab-prod map, so `mgmt-02` must read `proxmox = "pve-09"`.
+> **HA topology *(rewritten in v5.4 — ADR-011)*.** The three mgmt nodes sit on **three different hypervisors**: `mgmt-01` → pve-01, `mgmt-02` → **pve-07**, `mgmt-03` → pve-02. Any single hypervisor loss leaves 2 of 3 alive and etcd keeps quorum. This is already set in the `homelab_mgmt_nodes` map above — note the key there is `proxmox`, not `node` as in the homelab-prod map, so `mgmt-02` must read `proxmox = "pve-07"`.
 >
-> *Superseded reasoning, kept for traceability:* through v5.3 this was 2 nodes on pve-01 and 1 on pve-02, documented as deliberate "asymmetric availability" on the grounds that pve-01 was the prod-adjacent host. That was a rationalization of a hardware constraint — with only two hypervisors there was nowhere else to put the third node. The constraint disappeared at v5.2 (Proxmox everywhere) and the concentration was left as an open decision through v5.3; v5.4 closes it. `vault-02` moves to pve-05 in the same change, so the two relocated quorum nodes land on *different* hosts rather than both on one. See the resolved failure-domain note in [Network Reference](02-network-reference.md).
+> *Superseded reasoning, kept for traceability:* through v5.3 this was 2 nodes on pve-01 and 1 on pve-02, documented as deliberate "asymmetric availability" on the grounds that pve-01 was the prod-adjacent host. That was a rationalization of a hardware constraint — with only two hypervisors there was nowhere else to put the third node. The constraint disappeared at v5.2 (Proxmox everywhere) and the concentration was left as an open decision through v5.3; v5.4 closes it. `vault-02` moves to pve-03 in the same change, so the two relocated quorum nodes land on *different* hosts rather than both on one. See the resolved failure-domain note in [Network Reference](02-network-reference.md).
 
 #### 1.3e — Environment: storage
 
@@ -594,7 +594,7 @@ resource "proxmox_virtual_environment_container" "garage" {
 
 ### Phase 1.4: ~~Baremetal Preparation~~ — Removed *(v5.2)*
 
-> **This phase no longer exists.** Through v5.1, prod-cp-01/prod-w-01/prod-w-02 were bare-metal M920q machines that needed a separate manual Ubuntu install and prep step here. As of **ADR-008**, each M920q runs Proxmox (pve-06/07/08) and its prod node is an OpenTofu-provisioned VM created in **Phase 1.3** — identical cloud-init bootstrap to every other VM. There is nothing bespoke left to do:
+> **This phase no longer exists.** Through v5.1, prod-cp-01/prod-w-01/prod-w-02 were bare-metal M920q machines that needed a separate manual Ubuntu install and prep step here. As of **ADR-008**, each M920q runs Proxmox (pve-04/05/06) and its prod node is an OpenTofu-provisioned VM created in **Phase 1.3** — identical cloud-init bootstrap to every other VM. There is nothing bespoke left to do:
 >
 > - **Provisioning** → Phase 1.3b (the `homelab-prod` env now covers all four nodes).
 > - **Baseline packages / chrony / SSH key-only** → the `roles/common` play, same as every host. `qemu-guest-agent` *is* now wanted (they're VMs) and is enabled via the `agent { enabled = true }` block in the VM module.
@@ -1380,7 +1380,7 @@ kubectx homelab-mgmt   # context for observability + identity
 - [ ] **homelab-prod** (prod): 4 nodes Ready, Cilium healthy, kube-proxy replacement = Strict, WireGuard encryption on, BGP CP enabled, audit log writing, etcd secrets encryption verified. *(v5.4: `prod-gpu-01` is provisioned as a VM but deliberately **not** joined until Tier 5 — so 4 Ready is correct here, becoming 5 at the Tier 5 gate. See ADR-011.)*
 - [ ] **homelab-dev** (dev/staging): 3 nodes Ready, same Cilium and audit features active
 - [ ] **Mgmt-plane**: 3 nodes Ready (HA), etcd quorum tested by stopping 1 node and confirming continued operation, all 3 nodes back online after restart
-- [ ] **Quorum spread verified** *(v5.4)*: `mgmt-01`/`mgmt-02`/`mgmt-03` are on pve-01/pve-09/pve-02 and `vault-01`/`vault-02`/`vault-03` are on pve-01/pve-05/pve-02 — no hypervisor hosts two nodes of either quorum. Confirm in the Proxmox UI, not just in the OpenTofu plan
+- [ ] **Quorum spread verified** *(v5.4)*: `mgmt-01`/`mgmt-02`/`mgmt-03` are on pve-01/pve-07/pve-02 and `vault-01`/`vault-02`/`vault-03` are on pve-01/pve-03/pve-02 — no hypervisor hosts two nodes of either quorum. Confirm in the Proxmox UI, not just in the OpenTofu plan
 - [ ] **Single-host loss drill** *(v5.4)*: power off pve-01, confirm OpenBao stays unsealed and serving *and* the mgmt cluster stays responsive (both at 2 of 3), then power it back on and confirm both nodes rejoin. This is the drill the pre-v5.4 layout could not have passed
 - [ ] All three kubeconfigs in `pass`, contexts labeled `homelab-prod` / `homelab-dev` / `mgmt`, `kubectx` switches between them cleanly
 
