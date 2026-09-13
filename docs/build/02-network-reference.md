@@ -38,7 +38,7 @@
 
 | Host / Component       | IP              | VLAN | Role                                    | Location           |
 | ---------------------- | --------------- | ---- | --------------------------------------- | ------------------ |
-| Workstation            | 192.168.10.77   | 10   | Daily driver                            | Physical           |
+| Workstation            | 192.168.10.20   | 10   | Daily driver                            | Physical           |
 | pve-01 (M920 SFF)   | 192.168.40.50   | 40   | Hypervisor 1 (64GB, prod-adjacent)      | Physical           |
 | pve-02 (M920x #1)  | 192.168.40.55   | 40   | Hypervisor 2 (32GB, dev/staging)        | Physical           |
 | pve-03 (M920x #2)  | 192.168.40.58   | 40   | Hypervisor 3 (32GB, spare + quorum) *(v5.2)* | Physical        |
