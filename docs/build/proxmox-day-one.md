@@ -26,8 +26,8 @@ The tower is the seventh machine. pve-03/pve-04 and .56/.57 are unused, not inst
 | Host-facing ports | Native | Allowed tagged guest VLANs |
 | --- | --- | --- |
 | pve-01 and pve-02 | 40 | 50, 60 (both will host VyOS routers) |
-| pve-05 | 40 | None initially |
-| pve-06, pve-07, pve-08, pve-09 | 40 | 50 |
+| pve-03 | 40 | None initially |
+| pve-04, pve-05 | 40 | 50 |
 | Selected ephemeral host, when needed | 40 | Add 70 to that host's existing list |
 
 - [ ] Carry 10/40/50/60 across the switch-to-switch and gateway uplinks; add 70 end to end before using it. Keep uplink native VLANs consistent and preserve the existing management network for switches/APs. A host-facing native-40 profile must not be blindly applied to every uplink or AP port.
