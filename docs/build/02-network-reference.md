@@ -6,7 +6,7 @@
 
 ## Network Architecture (Reference)
 
-**Current installation baseline (ADR-012):** seven members in `homelab-pve`; hosts are numbered pve-01 through pve-07; .56/.57 remain unused. All home networking equipment is UniFi. Follow the [day-one port matrix](proxmox-day-one.md) for native VLAN 40 on host-facing ports and tagged guest VLANs. The owner confirmed `192.168.40.1` is the UniFi gateway; retain it for Proxmox/platform routing and use it for DNS only after verifying DNS service. VyOS uses planned VIP `192.168.40.12` for LoadBalancer routes; confirm .12 is free and exclude it from DHCP before deployment. VLAN 50/60 gateway ownership still needs verification before assigning their planned VyOS VIPs.
+**Current installation baseline (ADR-012):** seven members in `homelab-pve`; hosts are numbered pve-01 through pve-07; .56/.57 remain unused. All home networking equipment is UniFi. Follow the [day-one port matrix](proxmox-day-one.md) for native VLAN 40 on host-facing ports and tagged guest VLANs. The owner confirmed `192.168.40.1` is the UniFi gateway; retain it for Proxmox/platform routing and use it for DNS only after verifying DNS service. VyOS uses planned VIP `192.168.40.12` for LoadBalancer routes; confirm .12 is free and outside the DHCP range before deployment. A MAC-based UniFi fixed-IP reservation is not needed for this future VRRP VIP. VLAN 50/60 gateway ownership still needs verification before assigning their planned VyOS VIPs.
 
 ### VLAN plan
 
@@ -17,6 +17,8 @@
 | 50   | 192.168.50.0/24   | homelab-prod cluster (prod nodes + LB pool)        |
 | 60   | 192.168.60.0/24   | homelab-dev cluster (dev/staging nodes + LB pool)      |
 | 70   | 192.168.70.0/24   | Ephemeral clusters (capacity-checked existing hosts — ADR-004/012) *(v5.1)* |
+
+**Subnet versus pool:** UniFi VLANs 40, 50, 60, and 70 remain `/24` networks. The three planned `*.240/28` routes below describe smaller LoadBalancer destination blocks *within* the corresponding `/24` VLANs; they do not change the VLAN masks. The owner adjusted DHCP ranges for all four VLANs on 2026-09-19. Keep every planned static address and VIP outside its VLAN's DHCP range. In particular, exclude `192.168.40.12` and the full `192.168.40.240–255`, `192.168.50.240–255`, and `192.168.60.240–255` blocks from DHCP before enabling those VIPs or pools. UniFi fixed-IP reservations require client identity; shrinking the DHCP range protects addresses that have no MAC yet.
 
 > **Note on VLAN expansion:** v3 used a single workload VLAN (40). v4 separates platform from prod from dev/staging, mirroring how real shops carve impact-level / tenancy boundaries at L2. Your switch must support VLAN trunks to **every Proxmox host** (v5.2: that now includes the M920q/M920x #2 boxes carrying the prod-tier VLAN 50). Configure trunks before starting Tier 0.
 >
@@ -98,7 +100,6 @@
 | homelab-dev-lb-pool           | 192.168.60.240 – 192.168.60.250  | Cilium (homelab-dev)      | homelab-dev services         |
 | mgmt-lb-pool            | 192.168.40.240 – 192.168.40.250  | Cilium (homelab-mgmt) | homelab-mgmt services    |
 
-> **Edge router static routes:** Because most consumer/prosumer edge routers don't speak BGP, the edge gets static routes pointing each LB pool to `192.168.40.12` (the VRRP virtual IP). VyOS handles the rest. This keeps the BGP topology entirely internal.
+> **Edge router static routes:** Because most consumer/prosumer edge routers don't speak BGP, the edge gets `/28` static routes pointing each LB pool to `192.168.40.12` (the VRRP virtual IP). VyOS handles the rest. This keeps the BGP topology entirely internal. Apply routes only after the VIP is live. A client on the *same* `/24` as an LB address may ARP for it directly instead of using the edge route; validate same-VLAN reachability when Cilium LB advertisement is configured, and use an explicit on-link advertisement or an off-link pool if needed.
 
 ---
-

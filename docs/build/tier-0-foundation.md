@@ -65,7 +65,7 @@ If already installed from v3, skip to verification. Otherwise follow the v3 Phas
 - [ ] Access UI from workstation: `https://192.168.40.55:8006`
 - [ ] Apt update + dist-upgrade
 - [ ] Configure VLAN-aware `vmbr0`, native management VLAN 40, and tagged guest VLANs 50/60 for VyOS
-- [ ] Set DHCP reservation on edge router for `192.168.40.55`
+- [ ] Confirm `192.168.40.55` is outside the edge-router DHCP range
 - [ ] Upload the Ubuntu Server 26.04.1 live-server amd64 ISO and VyOS LTS ISO to local storage; the Ubuntu ISO is already on pve-01
 
 #### pve-03 (M920x #2, 32GB / 1TB — spare + quorum) *(v5.2)*
@@ -76,7 +76,7 @@ Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacit
 - [ ] Management IP `192.168.40.58`, gateway `192.168.40.1` (UniFi, confirmed); hostname `pve-03`; apt update + dist-upgrade
 - [ ] Configure `vmbr0` to accept trunked VLAN 40 (add VLAN 50 if you place a prod-tier VM here)
 - [ ] Stage the Ubuntu Server 26.04.1 live-server amd64 ISO and 26.04 amd64 cloud image on local storage
-- [ ] DHCP reservation on the edge router
+- [ ] Confirm the management IP is outside the edge-router DHCP range
 
 #### pve-04 / pve-05 / pve-06 (3× M920q, 16GB / 512GB each — homelab-prod node hosts) *(v5.2)*
 
@@ -87,7 +87,7 @@ Each M920q hosts exactly **one** homelab-prod node VM (pve-04 → prod-cp-01, pv
 - [ ] Hostnames `pve-04` / `pve-05` / `pve-06`; apt update + dist-upgrade
 - [ ] Configure `vmbr0` to accept trunked VLAN 50 (the homelab-prod cluster VLAN) — and VLAN 40 for the management interface
 - [ ] Stage the Ubuntu Server 26.04 amd64 cloud image on local storage on each
-- [ ] DHCP reservations on the edge router for all three
+- [ ] Confirm all three management IPs are outside the edge-router DHCP range
 
 #### pve-07 (Tower — Ryzen 9 7900X, 64GB / 2× 2TB WD_BLACK SN850X NVMe / RTX 5070) *(v5.4)*
 
@@ -109,7 +109,7 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 - [ ] **Cap the ARC:** write `options zfs zfs_arc_max=10737418240` (10GB) to `/etc/modprobe.d/zfs.conf`, then `update-initramfs -u` and reboot. 64GB shared between `mgmt-02`, a build VM, `prod-gpu-01`, and an uncapped ARC will otherwise get tight
 - [ ] Configure `vmbr0` to accept trunked VLANs **40 and 50** (40 for `mgmt-02` and management, 50 for `prod-gpu-01`)
 - [ ] Stage the Ubuntu Server 26.04 amd64 cloud image **and** the Talos `metal-amd64.iso` (this host runs both a Talos mgmt node and Ubuntu-based RKE2/build VMs)
-- [ ] DHCP reservation on the edge router
+- [ ] Confirm the management IP is outside the edge-router DHCP range
 
 **GPU passthrough prep** *(config only — no VM consumes the GPU until Tier 5):*
 
@@ -144,8 +144,8 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 - [ ] In UniFi Port Manager, set hypervisor ports to **Native VLAN 40** and custom **Tagged VLAN Management** for guest VLANs: pve-01/02 need 50 and 60 for the VyOS routers; pve-04/05/06/07 need 50; pve-03 needs no extra guest VLAN initially. Add 70 to the chosen ephemeral host and every upstream link before a drill. Workstation access port: native VLAN 10.
 - [ ] Confirm the **inter-switch link** carries 10/40/50/60 and matches native VLAN settings at both ends; add 70 before ephemeral use. Preserve existing switch/AP management.
 - [ ] Create VLAN interfaces on the edge router for VLANs 50 and 60 (if not already present for 10/40)
-- [ ] Add temporary DHCP scopes on VLANs 50 and 60 (you'll replace with static cloud-init later; useful for first-boot testing)
-- [ ] Add static routes on edge router (these point at VyOS VRRP IP once it's up; for now, you can defer until Phase 0.3 is complete):
+- [ ] Confirm the owner-adjusted DHCP ranges on VLANs 40, 50, 60, and 70 leave planned static addresses and VIPs outside the pools. VLANs 50 and 60 need DHCP for disposable first-boot tests; later workload VMs use static cloud-init addressing. Exclude `192.168.40.12` and each planned `*.240–255` LoadBalancer block. A future VIP has no client MAC to reserve in UniFi; an out-of-range address is sufficient.
+- [ ] Prepare `/28` static routes on the edge router for the three LoadBalancer blocks below. These `/28` destinations sit inside the VLAN `/24` networks and do not change their subnet masks. Apply the routes only after the VyOS VRRP next hop is live in Phase 0.3:
   - `192.168.50.240/28 → 192.168.40.12`
   - `192.168.60.240/28 → 192.168.40.12`
   - `192.168.40.240/28 → 192.168.40.12`
@@ -177,7 +177,7 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 
 **Goal:** Two VyOS routers running, peered with each other via iBGP, providing a VRRP next hop for the LoadBalancer routes on VLAN 40, ready to peer with Cilium speakers in Tier 2.
 
-**Confirmed gateway correction (2026-09-12):** UniFi owns `192.168.40.1`; the planned VyOS VLAN 40 VIP is now `192.168.40.12`. Before assigning .12, confirm it is unused in UniFi clients/reservations and exclude it from DHCP. Proxmox and platform guests retain UniFi as their gateway. Before deploying the VLAN 50/60 VRRP examples below, verify their .1 addresses are not already owned by UniFi; their ownership has not yet been confirmed.
+**Confirmed gateway correction (2026-09-12):** UniFi owns `192.168.40.1`; the planned VyOS VLAN 40 VIP is now `192.168.40.12`. Before assigning .12, confirm it is unused in UniFi and outside the DHCP range; no preexisting client MAC is needed for a DHCP-range exclusion. Proxmox and platform guests retain UniFi as their gateway. Before deploying the VLAN 50/60 VRRP examples below, verify their .1 addresses are not already owned by UniFi; their ownership has not yet been confirmed.
 
 #### 0.3a — Provision both VyOS VMs
 
