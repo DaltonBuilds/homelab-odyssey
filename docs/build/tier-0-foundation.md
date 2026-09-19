@@ -34,6 +34,17 @@
 
 **Goal:** Every physical machine running Proxmox VE, accessible from workstation, ready to host VMs. *(v5.2: this now includes the M920q trio and M920x #2, which formerly ran bare-metal Ubuntu — see ADR-008. v5.4: and pve-07, the former workstation tower — see ADR-011.)*
 
+**Ubuntu media baseline (2026-09):** use the Ubuntu Server **26.04.1 live-server amd64 ISO** for manual Vault VM installs, and the separate Ubuntu Server **26.04 amd64 cloud image** (`ubuntu-26.04-server-cloudimg-amd64.img`) for later cloud-init VMs. The 26.04.1 point release is the install ISO version; Ubuntu publishes the cloud image under the 26.04 filename. The live-server ISO is already on pve-01. Because `local` storage is node-local, stage media on each host that will use it:
+
+| Media | Hosts | Planned use |
+| --- | --- | --- |
+| Ubuntu Server 26.04.1 live-server ISO | pve-01, pve-02, pve-03 | Manual installs of vault-01, vault-03, vault-02 |
+| VyOS LTS ISO | pve-01, pve-02 | bgp-01, bgp-02 |
+| Talos `metal-amd64.iso` | pve-01, pve-02, pve-07 | mgmt-01, mgmt-03, mgmt-02 |
+| Ubuntu Server 26.04 amd64 cloud image | pve-01 through pve-07, before those VMs are provisioned | Later Ubuntu cloud-init VMs |
+
+Record the downloaded image builds and checksums. The [Ubuntu Server ISO](https://ubuntu.com/download/server) and [Ubuntu cloud image](https://cloud-images.ubuntu.com/releases/resolute/release/) are different artifacts.
+
 Optional: use the [post-install helper](proxmox-day-one.md#optional-post-install-helper) for repository setup and updates on each host. Follow its cluster-specific prompt guidance: retain Corosync and default HA services, while leaving guests out of automatic HA.
 
 #### pve-01 (existing M920 SFF, 64GB / 1TB)
@@ -55,7 +66,7 @@ If already installed from v3, skip to verification. Otherwise follow the v3 Phas
 - [ ] Apt update + dist-upgrade
 - [ ] Configure VLAN-aware `vmbr0`, native management VLAN 40, and tagged guest VLANs 50/60 for VyOS
 - [ ] Set DHCP reservation on edge router for `192.168.40.55`
-- [ ] Upload Ubuntu Server 24.04 ISO and VyOS LTS ISO to local storage
+- [ ] Upload the Ubuntu Server 26.04.1 live-server amd64 ISO and VyOS LTS ISO to local storage; the Ubuntu ISO is already on pve-01
 
 #### pve-03 (M920x #2, 32GB / 1TB — spare + quorum) *(v5.2)*
 
@@ -64,7 +75,7 @@ Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacit
 - [ ] Install Proxmox VE on the 1TB SSD, ext4 root
 - [ ] Management IP `192.168.40.58`, gateway `192.168.40.1` (UniFi, confirmed); hostname `pve-03`; apt update + dist-upgrade
 - [ ] Configure `vmbr0` to accept trunked VLAN 40 (add VLAN 50 if you place a prod-tier VM here)
-- [ ] Upload Ubuntu Server 24.04 cloud image to local storage
+- [ ] Stage the Ubuntu Server 26.04.1 live-server amd64 ISO and 26.04 amd64 cloud image on local storage
 - [ ] DHCP reservation on the edge router
 
 #### pve-04 / pve-05 / pve-06 (3× M920q, 16GB / 512GB each — homelab-prod node hosts) *(v5.2)*
@@ -75,7 +86,7 @@ Each M920q hosts exactly **one** homelab-prod node VM (pve-04 → prod-cp-01, pv
 - [ ] Management IPs: `192.168.40.59` (pve-04), `192.168.40.64` (pve-05), `192.168.40.65` (pve-06), gateway `192.168.40.1` (UniFi, confirmed)
 - [ ] Hostnames `pve-04` / `pve-05` / `pve-06`; apt update + dist-upgrade
 - [ ] Configure `vmbr0` to accept trunked VLAN 50 (the homelab-prod cluster VLAN) — and VLAN 40 for the management interface
-- [ ] Upload Ubuntu Server 24.04 cloud image to local storage on each
+- [ ] Stage the Ubuntu Server 26.04 amd64 cloud image on local storage on each
 - [ ] DHCP reservations on the edge router for all three
 
 #### pve-07 (Tower — Ryzen 9 7900X, 64GB / 2× 2TB WD_BLACK SN850X NVMe / RTX 5070) *(v5.4)*
@@ -97,7 +108,7 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 - [ ] Management IP `192.168.40.66`, gateway `192.168.40.1` (UniFi, confirmed); hostname `pve-07`; apt update + dist-upgrade
 - [ ] **Cap the ARC:** write `options zfs zfs_arc_max=10737418240` (10GB) to `/etc/modprobe.d/zfs.conf`, then `update-initramfs -u` and reboot. 64GB shared between `mgmt-02`, a build VM, `prod-gpu-01`, and an uncapped ARC will otherwise get tight
 - [ ] Configure `vmbr0` to accept trunked VLANs **40 and 50** (40 for `mgmt-02` and management, 50 for `prod-gpu-01`)
-- [ ] Upload the Ubuntu Server 24.04 cloud image **and** the Talos `metal-amd64.iso` (this host runs both a Talos mgmt node and Ubuntu-based RKE2/build VMs)
+- [ ] Stage the Ubuntu Server 26.04 amd64 cloud image **and** the Talos `metal-amd64.iso` (this host runs both a Talos mgmt node and Ubuntu-based RKE2/build VMs)
 - [ ] DHCP reservation on the edge router
 
 **GPU passthrough prep** *(config only — no VM consumes the GPU until Tier 5):*
@@ -114,7 +125,7 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 - [ ] All seven Proxmox web UIs load from workstation
 - [ ] `ping` succeeds to every hypervisor management IP (`.50`, `.55`, `.58`, `.59`, `.64`, `.65`, `.66` on VLAN 40)
-- [ ] Ubuntu 24.04 cloud image + VyOS/Talos ISOs visible in the relevant Proxmox storage pools
+- [ ] Ubuntu 26.04 cloud image + VyOS/Talos ISOs visible in the relevant Proxmox storage pools
 - [ ] All seven hosts joined to `homelab-pve`; `pvecm status` reports seven nodes, seven expected votes, quorum four, and `Quorate: Yes`; no HA-managed guests
 - [ ] `zpool status` on pve-07 shows a healthy 2-way mirror; `arc_summary` reflects the capped `zfs_arc_max` *(v5.4)*
 - [ ] `lspci -nnk` on pve-07 shows the RTX 5070 bound to `vfio-pci` *(v5.4)*
@@ -256,7 +267,7 @@ For **bgp-02**, identical config but:
 
 ### Phase 0.4: Vault VM Provisioning (Bootstrap Mode)
 
-**Goal:** Three Vault VMs (vault-01/02/03) running Ubuntu Server 24.04, hardened baseline, OpenBao binary installed (pinned 2.6.x), ready to initialize.
+**Goal:** Three Vault VMs (vault-01/02/03) running Ubuntu Server 26.04.1, hardened baseline, OpenBao binary installed (pinned 2.6.x), ready to initialize.
 
 > **Bootstrap pragmatism:** We're going to hand-provision these three VMs in the Proxmox UI rather than via Terraform. Reason: Terraform will be Vault-authenticated starting in Tier 1, and the Vault that authenticates it has to exist first. After Tier 0 completes, all future infrastructure provisioning (including replacing or scaling these Vault VMs) goes through Terraform-with-Vault. This is the *only* manual provisioning in the entire build.
 
@@ -274,7 +285,7 @@ For each (specs are identical):
 
 > **One Raft node per hypervisor *(v5.4 — ADR-011)*.** `vault-02` moved off pve-01 so no single hypervisor hosts two of the three OpenBao nodes. Do not "simplify" this back onto pve-01 while hand-creating the VMs — the whole point of the Tier 1 single-host-loss drill is that this spread holds. `mgmt-02` moves to pve-07 in the same change.
 
-- [ ] Create each VM in Proxmox UI from Ubuntu 24.04 ISO
+- [ ] Create each VM in Proxmox UI from the Ubuntu Server 26.04.1 live-server amd64 ISO
 - [ ] Configure cloud-init with hostname, static IP on VLAN 40, your SSH key, `dalton` user with sudo, password auth disabled
 - [ ] Boot, complete initial Ubuntu install
 - [ ] On first SSH login, apt update + dist-upgrade, install `qemu-guest-agent`, reboot
@@ -1019,4 +1030,3 @@ You may not advance to Tier 1 until **every** item below passes.
 - [ ] Vault VM firewalls (`ufw`) restrict API access to the three workload VLANs only
 
 When all of the above pass: **Tier 0 is complete.** The substrate exists. Everything from Tier 1 onward stands on it.
-

@@ -422,7 +422,7 @@ module "homelab_prod_node" {
   memory_mb      = each.value.mem
   disk_size_gb   = each.value.disk
   datastore_id   = "local-lvm"
-  cloud_image_id = "local:iso/ubuntu-24.04-server-cloudimg-amd64.img"
+  cloud_image_id = "local:iso/ubuntu-26.04-server-cloudimg-amd64.img"
   vlan_id        = 50
   ip_address     = each.value.ip
   gateway        = "192.168.50.1"
@@ -479,7 +479,7 @@ module "homelab_dev_node" {
   memory_mb      = each.value.mem
   disk_size_gb   = each.value.disk
   datastore_id   = "local-lvm"
-  cloud_image_id = "local:iso/ubuntu-24.04-server-cloudimg-amd64.img"
+  cloud_image_id = "local:iso/ubuntu-26.04-server-cloudimg-amd64.img"
   vlan_id        = 60
   ip_address     = each.value.ip
   gateway        = "192.168.60.1"
@@ -576,11 +576,13 @@ resource "proxmox_virtual_environment_container" "garage" {
     size         = 100
   }
   operating_system {
-    template_file_id = "local:vztmpl/ubuntu-24.04-standard.tar.zst"
+    template_file_id = "local:vztmpl/ubuntu-26.04-standard_26.04-1_amd64.tar.zst"
     type             = "ubuntu"
   }
 }
 ```
+
+The Garage LXC template is separate from the Ubuntu Server ISO and cloud image. Before applying, check `pveam available --section system` and `pveam list local` on pve-01; use the exact available Ubuntu 26.04 template filename if its revision differs from the example.
 
 #### Verification
 

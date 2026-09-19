@@ -41,25 +41,42 @@ Proxmox
 
 Create the first VM after the Proxmox hosts are available.
 
-**Suggested VM:**
+**Bootstrap OS:** Ubuntu Server **26.04 LTS** (26.04.1 installer selected for this build). [Ubuntu publishes the LTS release](https://releases.ubuntu.com/releases/26.04.1/), and [Docker Engine officially supports Ubuntu 26.04](https://docs.docker.com/engine/install/ubuntu/). Huly's self-host README describes an Ubuntu 24.04 deployment; Docker support for 26.04 does not by itself verify the complete Huly stack. Complete the exit checks below on this VM.
 
-| Setting | Value |
+**Proxmox VM settings:** Configure these with the VM stopped. Use **Advanced** in the relevant edit dialog to reveal additional fields.
+
+| Proxmox setting | Value |
 |---|---|
-| Hostname | `huly-bootstrap` |
-| OS | Ubuntu Server 24.04 LTS |
-| vCPU | 2 initially; increase to 4 if needed |
-| RAM | 8 GB initially; increase to 16 GB if needed |
-| Disk | 80–100 GB |
-| Network | Management network / VLAN 40 when available |
-| IP | Stable DHCP reservation or unused static address |
+| Node / VM ID / Name | `pve-01` / `100` / `huly-bootstrap` for the VM already created; use a free cluster-wide ID for any new VM |
+| OS / installation media | Linux; Ubuntu Server 26.04.1 LTS live-server AMD64 ISO |
+| BIOS / Machine / Display | Default SeaBIOS / i440fx / Default |
+| SCSI controller | VirtIO SCSI single |
+| Disk | SCSI (`scsi0`), `local-lvm`, 80–100 GiB; existing 84 GiB disk fits; enable IO thread |
+| CPU sockets / cores | 1 socket × 2 cores initially; increase to 4 cores if needed |
+| CPU VCPUs (Advanced) | 2 initially; set to 4 when increasing cores to 4 |
+| CPU limit (Advanced) | 0 (unlimited) |
+| CPU type | `host` for this VM staying on pve-01; exposes the host's available CPU instruction sets |
+| Memory | **8192 MiB** initially (8 GiB); increase to **16384 MiB** (16 GiB) if needed |
+| Ballooning device | Disable for a fixed memory allocation during bootstrap |
+| Network | VirtIO (`net0`), bridge `vmbr0`, VLAN tag **blank** with the current native-VLAN-40 switch configuration |
+| Network firewall | Keep enabled; effective rules must allow the intended LAN access and outbound installation traffic |
+| QEMU Guest Agent | Enable under **Options → QEMU Guest Agent** (or the System page during creation) |
+| IP | Stable DHCP reservation or unused static address on management VLAN 40 |
 
-Huly currently documents **2 vCPU / 8 GB as the minimum** and **4 vCPU / 16 GB+ as recommended**. For one user, start at the minimum and resize the VM if the stack is memory-constrained.
+The CPU topology gives the maximum number of guest CPUs (`sockets × cores`); **VCPUs** controls how many are plugged in at startup. A row showing `7 cores` together with `vcpus=1` still starts with only one active virtual CPU. **CPU limit** caps CPU time and does not activate cores. If the VCPUs field rejects `2`, save **1 socket / 2 cores** first, then reopen the dialog and set **VCPUs = 2**. This field cannot exceed sockets × cores. Apply changes with a full guest shutdown followed by Proxmox **Start**, rather than relying on an in-guest reboot or CPU hotplug.
+
+Using CPU type `host` means migration requires checking destination CPU compatibility, particularly in this mixed Intel/AMD cluster. The later Huly move described here uses a separate deployment and backup/restore. See [Proxmox's VM documentation](https://github.com/proxmox/pve-docs/blob/master/qm.adoc) for CPU, memory, storage, and guest-agent settings.
+
+Huly currently documents **2 vCPU / 8 GB as the minimum** and **4 vCPU / 16 GB+ as recommended** in its [self-host README](https://github.com/hcengineering/huly-selfhost#system-requirements). For one user, start at the minimum and resize if CPU or memory is constrained. Proxmox's memory input is in **MiB**: enter `8192` for 8 GiB.
+
+The blank VLAN tag follows this lab's [day-one network configuration](../build/proxmox-day-one.md#2-prepare-unifi-before-relying-on-remote-access): the host-facing switch port carries VLAN 40 natively, so the VM sends untagged traffic. Confirm the guest receives a `192.168.40.x` address and can reach the gateway and workstation. Do not add tag 40 unless the bridge and upstream switch configuration are deliberately changed to carry it tagged.
 
 During Ubuntu installation:
 
 - Create an admin user with your SSH public key.
 - Disable password-based SSH if convenient during install.
-- Install/enable the QEMU guest agent.
+- Install the QEMU guest agent after first login; enable its Proxmox option as described above.
+- After installation, eject the ISO from **Hardware → CD/DVD Drive** and put `scsi0` first under **Options → Boot Order**.
 - Do **not** expose this VM directly to the public internet.
 
 After first login:
@@ -68,8 +85,21 @@ After first login:
 sudo apt update
 sudo apt full-upgrade -y
 sudo apt install -y git nginx qemu-guest-agent ca-certificates curl
-sudo systemctl enable --now qemu-guest-agent nginx
+sudo systemctl start qemu-guest-agent
+sudo systemctl enable --now nginx
 ```
+
+Verify inside Ubuntu before deploying Huly:
+
+```bash
+nproc
+free -h
+lsblk
+ip -br address
+systemctl is-active qemu-guest-agent
+```
+
+Expect `nproc` to report **2** (or **4** if selected), memory slightly below the configured allocation, and the expected management address. Check `df -h /` as well: Ubuntu's guided LVM installation may leave disk space unallocated, so ensure the root filesystem has room for Docker images and volumes. The guest agent should report `active`; if its device is missing, confirm the Proxmox option and fully shut down/start the VM. Ubuntu's packaged agent is device-activated and may report a static unit, so a separate `systemctl enable` is not required. Confirm Proxmox shows the guest IP and that the agent is active again after a reboot.
 
 ---
 
@@ -309,5 +339,7 @@ Only decommission `huly-bootstrap` after a restored workspace has been validated
 - Huly self-host repository: https://github.com/hcengineering/huly-selfhost
 - Huly self-host documentation: https://docs.huly.io/getting-started/self-host/
 - Docker Engine on Ubuntu: https://docs.docker.com/engine/install/ubuntu/
+- Ubuntu Server 26.04.1 LTS: https://releases.ubuntu.com/releases/26.04.1/
+- Proxmox VM configuration: https://github.com/proxmox/pve-docs/blob/master/qm.adoc
 
 > **Maintenance note:** Huly is actively changing. Re-check the upstream self-host README and `MIGRATION.md` when you actually perform the installation rather than assuming commands in this companion document remain valid forever.
