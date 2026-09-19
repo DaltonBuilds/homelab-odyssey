@@ -22,7 +22,7 @@
 
 > **Note on VLAN expansion:** v3 used a single workload VLAN (40). v4 separates platform from prod from dev/staging, mirroring how real shops carve impact-level / tenancy boundaries at L2. Your switch must support VLAN trunks to **every Proxmox host** (v5.2: that now includes the M920q/M920x #2 boxes carrying the prod-tier VLAN 50). Configure trunks before starting Tier 0.
 >
-> **v5.4 — two switches, one L2 domain.** The fabric is two managed UniFi switches: an upstream switch that feeds the home-office wall jacks, and an 8-port switch in the office. pve-07 lands on its own office jack rather than on the office switch, so **the trunk must be configured on both switches and on the inter-switch path** — VLANs 10/40/50/60 carried across uplinks; host-facing ports use native 40 and tagged guest VLANs per the day-one matrix. A correct config on the office switch alone will leave pve-07 reachable on the native VLAN but silently missing 40/50, which surfaces much later as a VM that won't get an address. Verify the jack, not just the switch port.
+> **Current two-switch topology (owner update 2026-09-19).** The two office wall-jack ports feed the AP and the 8-port UniFi Flex switch separately. All seven Proxmox hosts, including pve-07, connect directly to the Flex switch; its eighth port is the uplink to the upstream switch. The Flex switch has no spare port in this layout. Carry VLANs 10/40/50/60 across the inter-switch uplink, with VLAN 70 added before use; configure each host-facing port with native VLAN 40 and its required tagged guest VLANs from the [day-one matrix](proxmox-day-one.md). A pve-07 VLAN 50 test checks its Flex host port and the shared inter-switch uplink, rather than a dedicated wall-jack trunk.
 
 ### BGP ASN plan
 

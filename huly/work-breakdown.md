@@ -60,10 +60,10 @@ This document translates the build docs into Huly work items. It is the source y
 
 **Epic [0.2] Switch / VLAN configuration** — `network`
 - Story: Trunk VLANs 10/40/50/60 (+70 to ephemeral hosts) to every hypervisor uplink + workstation, **on both UniFi switches**.
-- Story: Confirm the inter-switch link carries all four VLANs tagged — the office jacks (incl. pve-07) sit downstream of it. *(v5.4)*
+- Story: Confirm the inter-switch link carries all four VLANs tagged. The two office wall-jack ports feed the AP and 8-port Flex switch separately; all seven Proxmox hosts, including pve-07, use Flex host ports, and the eighth Flex port is the uplink. *(owner update 2026-09-19)*
 - Story: Edge-router VLAN interfaces + temporary DHCP scopes on 50/60.
 - Story: Static routes for the three LB pools → planned VyOS VIP `192.168.40.12` (verify unused first); UniFi remains the host gateway at `192.168.40.1`.
-- Story (verify): tagged test VM on pve-01(VLAN50)/pve-02(VLAN60)/**pve-07(VLAN50)** reaches edge + internet; delete test VMs. **The pve-07 case is the one that proves the office-jack trunk.**
+- Story (verify): tagged test VM on pve-01(VLAN50)/pve-02(VLAN60)/**pve-07(VLAN50)** reaches edge + internet; delete test VMs. **The pve-07 case checks its Flex host port and the shared inter-switch uplink.**
 
 **Epic [0.3] VyOS BGP fabric** — `network`
 - Story: Provision bgp-01 (pve-01) + bgp-02 (pve-02) from VyOS ISO (UI, not Terraform); snapshot after install.

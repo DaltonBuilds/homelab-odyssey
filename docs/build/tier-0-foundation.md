@@ -138,9 +138,9 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 This is the most boring and most critical phase. BGP, cluster separation, everything downstream assumes VLAN trunking is correct.
 
-> **Topology (v5.4):** two managed UniFi switches — an upstream switch feeding the home-office wall jacks, and an 8-port switch in the office. **pve-07 lands on its own office jack, not on the office switch**, so its trunk is configured on the upstream switch and must survive the inter-switch path. Getting this right on the office switch alone leaves pve-07 reachable on the native VLAN while silently missing 40/50 — which surfaces much later as a VM that never gets an address. Verify the jack, not just the switch port. Also sanity-check port count: seven hypervisors plus the workstation plus the edge uplink is nine endpoints across the two switches.
+> **Current topology (owner update 2026-09-19):** the two office wall-jack ports feed the AP and the 8-port UniFi Flex switch separately. All seven Proxmox hosts, including pve-07, connect directly to the Flex switch. Its eighth port is the uplink to the upstream switch, leaving no spare Flex port. Configure the Flex host ports and shared inter-switch uplink for the required VLANs; verify the two wall-jack paths and actual port numbers.
 
-- [ ] Identify port assignments across **both** switches for pve-01, pve-02, pve-03, pve-04, pve-05, pve-06, and pve-07, the workstation, and the uplink to the edge router *(v5.2: five more hypervisor ports than the two-host layout — the M920q prod hosts pve-04/05/06 in particular must trunk VLAN 50. v5.4: pve-07 added, on an office jack fed by the upstream switch.)*
+- [ ] Identify port assignments across **both** switches for pve-01 through pve-07 on the Flex switch, its inter-switch uplink, the AP's separate wall-jack path, the workstation's actual network path, and the edge-router uplink. The M920q prod hosts pve-04/05/06 and pve-07 need tagged VLAN 50.
 - [ ] In UniFi Port Manager, set hypervisor ports to **Native VLAN 40** and custom **Tagged VLAN Management** for guest VLANs: pve-01/02 need 50 and 60 for the VyOS routers; pve-04/05/06/07 need 50; pve-03 needs no extra guest VLAN initially. Add 70 to the chosen ephemeral host and every upstream link before a drill. Workstation access port: native VLAN 10.
 - [ ] Confirm the **inter-switch link** carries 10/40/50/60 and matches native VLAN settings at both ends; add 70 before ephemeral use. Preserve existing switch/AP management.
 - [ ] Create VLAN interfaces on the edge router for VLANs 50 and 60 (if not already present for 10/40)
@@ -154,7 +154,7 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 
 - [ ] From a test VM on pve-01 tagged to VLAN 50, can reach the edge router and the internet
 - [ ] From a test VM on pve-02 tagged to VLAN 60, same
-- [ ] **From a test VM on pve-07 tagged to VLAN 50, same** — this is the one that proves the office-jack trunk, so do not skip it *(v5.4)*
+- [ ] **From a test VM on pve-07 tagged to VLAN 50, same** — this checks pve-07's Flex host port and the shared inter-switch uplink, so do not skip it
 - [ ] Delete test VMs
 
 > **Blog note:** This phase rarely makes it into homelab writeups but is exactly the kind of L2 hygiene that breaks "production-grade" claims when skipped. Document your switch model and config — the next time you replace it, future-you will thank you.
@@ -990,7 +990,7 @@ You may not advance to Tier 1 until **every** item below passes.
 #### Hypervisor & network
 
 - [ ] All seven Proxmox hosts operational, accessible from workstation, joined to `homelab-pve` with healthy quorum and no HA-managed guests *(v5.4: pve-07 included — plus a healthy ZFS mirror and the GPU bound to `vfio-pci`)*
-- [ ] Both switches use the Phase 0.2 native/tagged port matrix; inter-switch links carry 10/40/50/60 (and 70 when used), with matching native VLAN settings. Test guest traffic through pve-07’s actual wall jack.
+- [ ] Both switches use the Phase 0.2 native/tagged port matrix; the Flex-to-upstream link carries 10/40/50/60 (and 70 when used), with matching native VLAN settings. Test guest traffic from pve-07 through its Flex host port and the inter-switch uplink.
 - [ ] `ping 192.168.40.12` from workstation succeeds (VRRP virtual IP responds)
 
 #### BGP fabric

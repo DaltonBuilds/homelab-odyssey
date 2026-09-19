@@ -16,7 +16,7 @@ Accepted inventory and clustering decision: [ADR-012](01-adrs.md#adr-012--seven-
 | pve-06 | M920q #3, 16GB | 192.168.40.65/24 | 512GB, ext4 |
 | pve-07 | Ryzen tower, 64GB, RTX 5070 | 192.168.40.66/24 | Both 2TB WD_BLACK SN850X NVMe, ZFS RAID1 |
 
-The tower is pve-07, the seventh machine. All names pve-01 through pve-07 are in use; addresses .56/.57 remain unused. Record MAC addresses, disk identities, and switch ports/wall jacks. Save passwords outside Git.
+The tower is pve-07, the seventh machine. All names pve-01 through pve-07 are in use; addresses .56/.57 remain unused. Record MAC addresses, disk identities, Flex switch host ports, and the two office wall-jack paths. Save passwords outside Git.
 
 ## 2. Prepare UniFi before relying on remote access
 
@@ -33,7 +33,7 @@ The tower is pve-07, the seventh machine. All names pve-01 through pve-07 are in
 | Selected ephemeral host, when needed | 40 | Add 70 to that host's existing list |
 
 - [ ] Carry 10/40/50/60 across the switch-to-switch and gateway uplinks; add 70 end to end before using it. Keep uplink native VLANs consistent and preserve the existing management network for switches/APs. A host-facing native-40 profile must not be blindly applied to every uplink or AP port.
-- [ ] Verify the actual upstream port serving pve-07's wall jack. Confirm the documented two-switch layout against physical cabling.
+- [ ] Verify the two office wall-jack paths: one feeds the AP, and the other feeds the 8-port Flex switch. Confirm pve-01 through pve-07 occupy the seven Flex host ports and the eighth port uplinks to the upstream switch. Record the actual port numbers and verify the inter-switch trunk.
 - [ ] Permit member-to-member TCP 22 and 8006 and UDP 5405–5412 on the trusted management network. Verify reliable wired connectivity and low latency; schedule bulk transfers so they do not starve Corosync. A dedicated physical cluster NIC is the recommended future improvement if available.
 
 Native VLAN 40 means the host sends management traffic untagged. The management IP belongs on vmbr0, not vmbr0.40. Guest NICs for VLAN 50/60/70 use the corresponding Proxmox VLAN tag. A VLAN-40 guest can use an untagged NIC with this bridge setup. VyOS trunk NICs need deliberate guest-side tagging as described in Phase 0.3; do not combine a Proxmox access tag with duplicate guest subinterface tagging.
