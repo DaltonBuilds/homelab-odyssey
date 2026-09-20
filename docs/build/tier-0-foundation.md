@@ -186,8 +186,38 @@ For each VyOS VM, use the Proxmox UI for this one (Terraform won't manage Tier 0
 - [ ] **bgp-01** on pve-01: 1 vCPU, 1GB RAM, 8GB disk, virtual NIC on `vmbr0` with untagged/native VLAN 40 and tagged VLANs 50/60 passed as a trunk (no Proxmox access VLAN tag); VyOS handles the 50/60 sub-interfaces. Boot from VyOS ISO.
 - [ ] **bgp-02** on pve-02: same specs
 - [ ] Install VyOS to disk on both (`install image` in the live ISO console)
-- [ ] On first reboot, set initial credentials and a known SSH key
-- [ ] Snapshot both VMs in Proxmox immediately after fresh install — gives you a clean restore point
+- [ ] On first reboot, set a different password on each router, establish SSH access, and add a known SSH public key using the bootstrap sequence below
+- [ ] Snapshot both VMs in Proxmox after verifying the fresh install and access — gives you a clean restore point before VRRP/BGP changes
+
+**Validated console-to-SSH bootstrap (2026-09-20):** Proxmox noVNC did not provide usable paste into the VyOS text console. Do the short network setup in each VM's console, then use the workstation's terminal for the longer configuration. In Proxmox, check **VM → Hardware → Network Device**: bridge `vmbr0`, no Proxmox VLAN access tag. Check **host → System → Network**: `vmbr0` is VLAN aware. The switch path must carry native VLAN 40 and tagged VLANs 50/60. `vmbr0` alone does not prove the trunk is correct.
+
+After `install image` and reboot, use the VyOS console on **bgp-01** (`.10`) and **bgp-02** (`.11`) respectively. Confirm both addresses are unused before assigning them. Set a unique password for each router during install, or change one from configuration mode with `set system login user vyos authentication plaintext-password '<unique-password>'`, followed by `commit` and `save`. Do not put passwords or private keys in Git. The commands below show bgp-01; substitute `.11` in both address lines for bgp-02.
+
+```bash
+configure
+set interfaces ethernet eth0 address '192.168.40.10/24'
+set protocols static route 0.0.0.0/0 next-hop 192.168.40.1
+set service ssh port '22'
+set service ssh listen-address '192.168.40.10'
+commit
+save
+exit
+```
+
+The default route is needed for replies to a workstation on another VLAN, such as VLAN 10. Without it, both SSH and ping to the new router address timed out in the first deployment. From each VyOS console, confirm `show interfaces ethernet eth0` shows the assigned address and an up link, then ping `192.168.40.1`. From the workstation, run `ssh vyos@192.168.40.10` (or `.11`) and authenticate with that router's password. If it still times out, check the VM NIC, VLAN path, and UniFi policy before troubleshooting SSH credentials.
+
+In the workstation terminal, read the **public** key (for example, `cat ~/.ssh/id_ed25519.pub`) and add it on both routers. For an `ssh-ed25519 AAAA... comment` line, the VyOS `type` is `ssh-ed25519` and the `key` value is **only** the middle `AAAA...` field; including the type or comment in `key` fails validation. Paste the full base64 field on one line:
+
+```bash
+configure
+set system login user vyos authentication public-keys workstation type ssh-ed25519
+set system login user vyos authentication public-keys workstation key '<base64-field-only>'
+commit
+save
+exit
+```
+
+Open a new SSH session to each router to verify key login before relying on it. Take named fresh-install snapshots after this access check; a snapshot is a rollback point on that VM's storage, not a backup of the Proxmox host. Rolling back also restores the credentials saved in the snapshot.
 
 #### 0.3b — Base VyOS configuration
 
