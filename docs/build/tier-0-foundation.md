@@ -183,7 +183,7 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 
 For each VyOS VM, use the Proxmox UI for this one (Terraform won't manage Tier 0 infrastructure — that would create the same circular dependency we're eliminating with Vault):
 
-- [ ] **bgp-01** on pve-01: 1 vCPU, 1GB RAM, 8GB disk, network on `vmbr0` with VLAN 40 (no tag — let VyOS handle sub-interfaces), boot from VyOS ISO
+- [ ] **bgp-01** on pve-01: 1 vCPU, 1GB RAM, 8GB disk, virtual NIC on `vmbr0` with untagged/native VLAN 40 and tagged VLANs 50/60 passed as a trunk (no Proxmox access VLAN tag); VyOS handles the 50/60 sub-interfaces. Boot from VyOS ISO.
 - [ ] **bgp-02** on pve-02: same specs
 - [ ] Install VyOS to disk on both (`install image` in the live ISO console)
 - [ ] On first reboot, set initial credentials and a known SSH key
@@ -199,14 +199,13 @@ configure
 # Hostname
 set system host-name bgp-01
 
-# Management interface on VLAN 40 (untagged on this trunk for simplicity,
-# or use a VLAN sub-interface if your trunk requires tagging)
-set interfaces ethernet eth0 vif 40 address '192.168.40.10/24'
+# Management is untagged/native VLAN 40 on eth0; only VLANs 50/60 are tagged.
+set interfaces ethernet eth0 address '192.168.40.10/24'
 set interfaces ethernet eth0 vif 50 address '192.168.50.2/24'
 set interfaces ethernet eth0 vif 60 address '192.168.60.2/24'
 
 # VRRP — shared virtual IP per VLAN, bgp-01 is master (priority 200), bgp-02 backup (priority 100)
-set high-availability vrrp group VLAN40 interface eth0.40
+set high-availability vrrp group VLAN40 interface eth0
 set high-availability vrrp group VLAN40 vrid 40
 set high-availability vrrp group VLAN40 priority 200
 set high-availability vrrp group VLAN40 address 192.168.40.12/24

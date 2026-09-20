@@ -67,8 +67,8 @@ This document translates the build docs into Huly work items. It is the source y
 
 **Epic [0.3] VyOS BGP fabric** — `network`
 - Story: Provision bgp-01 (pve-01) + bgp-02 (pve-02) from VyOS ISO (UI, not Terraform); snapshot after install.
-- Story: Configure VRRP (VLAN 40 gateway `.1`), iBGP peering between the pair, pre-staged eBGP peers for cluster VLANs.
-- Story: Repoint pve-02 gateway to the VRRP IP.
+- Story: Configure VLAN 40 VRRP VIP `192.168.40.12` (UniFi retains `.1`), iBGP peering between the pair, and pre-staged eBGP peers for cluster VLANs. Confirm VLAN 50/60 VIP ownership before enabling those VRRP groups.
+- Story: Keep pve-02 and every other Proxmox host on UniFi gateway `192.168.40.1`; apply the prepared LB-pool routes to `.12` only after that VyOS VIP is live.
 - Story (verify): iBGP `Established`; VRRP failover < 3s; gateway ping survives bgp-01 power-off.
 
 ### Capability: Secrets Substrate (OpenBao)
