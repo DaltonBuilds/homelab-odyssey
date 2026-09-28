@@ -14,7 +14,7 @@ This is the entry point for the build. Work through the tiers **sequentially** �
 
 ## Canonical build order
 
-0. **[Bootstrap project tracking — Huly](bootstrap/huly-bootstrap.md)** *(interstitial)* — stand this up right after Proxmox + the management VLAN are live (Tier 0 Phase 0.1–0.2) and **before** OpenBao (Phase 0.4), so the rest of the build is tracked as work items. It is a deliberate manual bootstrap VM, a sibling to the hand-provisioned Vault VMs. See [Tier 0](build/tier-0-foundation.md).
+0. **Project tracking — YouTrack Cloud** — project `Homelab` (`HOMELAB`); agent integration setup is pending. See the [work breakdown](build/work-breakdown.md).
 1. [Tier 0 · Foundation](build/tier-0-foundation.md) — Proxmox on all seven nodes (incl. pve-07 + GPU passthrough prep), VLANs across both switches, VyOS BGP fabric, OpenBao HA + engines
 2. [Tier 1 · Platform Provisioning](build/tier-1-platform-provisioning.md) — OpenTofu/Ansible with Vault auth, storage tier, RKE2 (prod/dev) + Talos (mgmt)
 3. [Tier 2 · Platform Services](build/tier-2-platform-services.md) — Cilium BGP + DNS, ESO, cert-manager, Harbor, Flux, Zarf, Kyverno, supply chain
@@ -30,8 +30,7 @@ This is the entry point for the build. Work through the tiers **sequentially** �
 
 ## Project management
 
-- [Huly bootstrap guide](bootstrap/huly-bootstrap.md) — stand up the tracker
-- [Huly work breakdown](../huly/work-breakdown.md) — Tier→Milestone / Phase→Epic mapping and the Tier 0 backlog
+- [Work breakdown](build/work-breakdown.md) — tier/phase planning and the Tier 0 backlog
 
 ## Archive
 

@@ -6,7 +6,7 @@
 
 ## Network Architecture (Reference)
 
-**Current installation baseline (ADR-012):** seven members in `homelab-pve`; hosts are numbered pve-01 through pve-07; .56/.57 remain unused. All home networking equipment is UniFi. Follow the [day-one port matrix](proxmox-day-one.md) for native VLAN 40 on host-facing ports and tagged guest VLANs. The owner confirmed `192.168.40.1` is the UniFi gateway; retain it for Proxmox/platform routing and use it for DNS only after verifying DNS service. VyOS uses planned VIP `192.168.40.12` for LoadBalancer routes; confirm .12 is free and outside the DHCP range before deployment. A MAC-based UniFi fixed-IP reservation is not needed for this future VRRP VIP. VLAN 50/60 gateway ownership still needs verification before assigning their planned VyOS VIPs.
+**Planned cluster baseline (ADR-012):** seven members in `homelab-pve`; hosts are numbered pve-01 through pve-07; .56/.57 remain unused. All home networking equipment is UniFi. Follow the [day-one port matrix](proxmox-day-one.md) for native VLAN 40 on host-facing ports and tagged guest VLANs. The owner confirmed `192.168.40.1` is the UniFi gateway; retain it for Proxmox/platform routing and use it for DNS only after verifying DNS service. VyOS uses planned VIP `192.168.40.12` for LoadBalancer routes; confirm .12 is free and outside the DHCP range before deployment. A MAC-based UniFi fixed-IP reservation is not needed for this future VRRP VIP. VLAN 50/60 gateway ownership still needs verification before assigning their planned VyOS VIPs.
 
 ### VLAN plan
 
@@ -103,3 +103,6 @@
 > **Edge router static routes:** Because most consumer/prosumer edge routers don't speak BGP, the edge gets `/28` static routes pointing each LB pool to `192.168.40.12` (the VRRP virtual IP). VyOS handles the rest. This keeps the BGP topology entirely internal. Apply routes only after the VIP is live. A client on the *same* `/24` as an LB address may ARP for it directly instead of using the edge route; validate same-VLAN reachability when Cilium LB advertisement is configured, and use an explicit on-link advertisement or an off-link pool if needed.
 
 ---
+
+
+**pve-01 storage replacement (owner update 2026-09-27):** the 1TB SATA drive failed; a 2TB NVMe replacement is ordered, not installed. Keep the M920 SFF at `192.168.40.50` and retain all planned workload placements and guest disk budgets. Additional capacity adds headroom, not disk redundancy or a new failure domain. The failure-domain table above describes the intended completed platform, not currently deployed guests. See [recovery checklist](pve-01-recovery.md).

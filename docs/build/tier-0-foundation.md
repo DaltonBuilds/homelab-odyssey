@@ -34,7 +34,7 @@
 
 **Goal:** Every physical machine running Proxmox VE, accessible from workstation, ready to host VMs. *(v5.2: this now includes the M920q trio and M920x #2, which formerly ran bare-metal Ubuntu — see ADR-008. v5.4: and pve-07, the former workstation tower — see ADR-011.)*
 
-**Ubuntu media baseline (2026-09):** use the Ubuntu Server **26.04.1 live-server amd64 ISO** for manual Vault VM installs, and the separate Ubuntu Server **26.04 amd64 cloud image** (`ubuntu-26.04-server-cloudimg-amd64.img`) for later cloud-init VMs. The 26.04.1 point release is the install ISO version; Ubuntu publishes the cloud image under the 26.04 filename. The live-server ISO is already on pve-01. Because `local` storage is node-local, stage media on each host that will use it:
+**Ubuntu media baseline (2026-09):** use the Ubuntu Server **26.04.1 live-server amd64 ISO** for manual Vault VM installs, and the separate Ubuntu Server **26.04 amd64 cloud image** (`ubuntu-26.04-server-cloudimg-amd64.img`) for later cloud-init VMs. The 26.04.1 point release is the install ISO version; Ubuntu publishes the cloud image under the 26.04 filename. The live-server ISO was previously staged on pve-01; re-upload it after the failed-drive rebuild. Because `local` storage is node-local, stage media on each host that will use it:
 
 | Media | Hosts | Planned use |
 | --- | --- | --- |
@@ -47,9 +47,9 @@ Record the downloaded image builds and checksums. The [Ubuntu Server ISO](https:
 
 Optional: use the [post-install helper](proxmox-day-one.md#optional-post-install-helper) for repository setup and updates on each host. Follow its cluster-specific prompt guidance: retain Corosync and default HA services, while leaving guests out of automatic HA.
 
-#### pve-01 (existing M920 SFF, 64GB / 1TB)
+#### pve-01 (M920 SFF, 64GB / 2TB NVMe replacement pending)
 
-If already installed from v3, skip to verification. Otherwise follow the v3 Phase 0 procedure.
+Owner update 2026-09-27: the 1TB SATA drive failed and is considered unrecoverable. A 2TB NVMe replacement is ordered. Reinstall Proxmox with ext4 root, preserving hostname `pve-01` and IP `192.168.40.50`; follow the [recovery checklist](pve-01-recovery.md) to rejoin the existing cluster before recreating bgp-01. Do not create a new cluster.
 
 - [ ] Confirm pve-01 reachable at `192.168.40.50`
 - [ ] Update Proxmox to latest stable patch release: `apt update && apt dist-upgrade`
@@ -66,7 +66,7 @@ If already installed from v3, skip to verification. Otherwise follow the v3 Phas
 - [ ] Apt update + dist-upgrade
 - [ ] Configure VLAN-aware `vmbr0`, native management VLAN 40, and tagged guest VLANs 50/60 for VyOS
 - [ ] Confirm `192.168.40.55` is outside the edge-router DHCP range
-- [ ] Upload the Ubuntu Server 26.04.1 live-server amd64 ISO and VyOS LTS ISO to local storage; the Ubuntu ISO is already on pve-01
+- [ ] Upload the Ubuntu Server 26.04.1 live-server amd64 ISO and VyOS LTS ISO to local storage; re-stage the Ubuntu ISO on pve-01 after recovery
 
 #### pve-03 (M920x #2, 32GB / 1TB — spare + quorum) *(v5.2)*
 
@@ -113,7 +113,7 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 **GPU passthrough prep** *(config only — no VM consumes the GPU until Tier 5):*
 
-- [ ] Add `amd_iommu=on iommu=pt` to the kernel cmdline; `update-grub`; reboot
+- [ ] Follow the [GPU passthrough preflight](pve-07-gpu-passthrough.md). Verify firmware IOMMU support and the active bootloader before changing kernel parameters. AMD IOMMU is normally enabled by the kernel when firmware exposes it; `iommu=pt` is optional. Use `update-grub` for GRUB or `proxmox-boot-tool refresh` for systemd-boot after editing the appropriate configuration.
 - [ ] Confirm the GPU sits in its own IOMMU group: `for d in /sys/kernel/iommu_groups/*/devices/*; do echo "$(basename $(dirname $(dirname $d))) $(basename $d)"; done | sort -n`
 - [ ] Blacklist the host drivers (`nouveau`, `nvidia`) and bind `vfio-pci` to the GPU's PCI IDs (both the VGA function and its HDMI audio function) via `/etc/modprobe.d/`
 - [ ] `lspci -nnk` shows `Kernel driver in use: vfio-pci` on the GPU after reboot
@@ -161,15 +161,9 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 
 ---
 
-> ### ⏱ Interstitial: Stand up Huly now (project tracking) — *recommended*
+> ### Project tracking
 >
-> With Proxmox up (Phase 0.1) and the management VLAN reachable (Phase 0.2), you have exactly what you need to run **Huly**, the project-management system for this build — and nothing else has to exist yet. Standing it up here means the rest of Operation Long Haul is tracked as real work items (Milestones → Epics → Stories/Spikes → Tasks) from the very first phase.
->
-> - **Follow:** [`../bootstrap/huly-bootstrap.md`](../bootstrap/huly-bootstrap.md) — one Ubuntu VM, Docker Compose, LAN-only.
-> - **Then seed the backlog** from [`../../huly/work-breakdown.md`](../../huly/work-breakdown.md) (Tier 0 is fully broken down; later tiers are skeletoned).
-> - **Why here, and why manual:** Huly is a *deliberate second manual-provisioning exception* — a sibling to the hand-provisioned OpenBao VMs in Phase 0.4. It comes up **before** OpenBao and OpenTofu exist, so it cannot yet be provisioned the "proper" IaC way. That's fine and intentional; it is bootstrap infrastructure, later migrated onto `homelab-mgmt` (see the bootstrap doc's *Future Migration*). Treat its generated `huly_v7.conf` as sensitive — never commit it.
->
-> This is optional in the strict dependency sense (Tier 0 does not technically require it), but it is the intended workflow. Do just enough Huly to make Tier 0 work items usable, then continue with Phase 0.3.
+> Use YouTrack Cloud project `Homelab` (`HOMELAB`) and the [work breakdown](work-breakdown.md). Custom issue types are configured; the YouTrack MCP integration is connected. No tracker VM is required for Tier 0. Continue with Phase 0.3.
 
 ---
 

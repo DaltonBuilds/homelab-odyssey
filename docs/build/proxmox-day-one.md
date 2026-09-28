@@ -2,13 +2,13 @@
 
 Accepted inventory and clustering decision: [ADR-012](01-adrs.md#adr-012--seven-confirmed-hosts-one-proxmox-cluster-unifi-bootstrap-2026-09-12). This checklist is the installation-day entry point; finish the remaining [Tier 0](tier-0-foundation.md) work afterward.
 
-**Build status (owner-provided verification, 2026-09-13):** all seven hosts are installed. `pvecm status` confirms seven expected members/votes, quorum four, and `Quorate: Yes`; IPs match the inventory. On pve-07, two WD_BLACK SN850X 2000GB drives form an ONLINE `mirror-0` with zero read/write/checksum errors and no known data errors; `df -h` reports ~1.8TiB available on the fresh pool. Keep the current VM sizes (ADR-011). Other acceptance checks, including ARC limit and guest VLAN connectivity, remain separate.
+**Build status (owner-provided verification, 2026-09-13):** all seven hosts are installed. `pvecm status` confirms seven expected members/votes, quorum four, and `Quorate: Yes`; IPs match the inventory. On pve-07, two WD_BLACK SN850X 2000GB drives form an ONLINE `mirror-0` with zero read/write/checksum errors and no known data errors; `df -h` reports ~1.8TiB available on the fresh pool. Keep the current VM sizes (ADR-011). Owner update 2026-09-27: all seven hosts were installed and clustered, VLAN tests passed, and pve-07 onboarding is complete except GPU passthrough. These are historical confirmations; pve-01 is now offline after its 1TB SATA drive failed. A 2TB NVMe replacement was ordered on 2026-09-27; installation and recovery are pending. See the [recovery checklist](pve-01-recovery.md).
 
 ## 1. Confirm labels and addresses
 
 | Host | Physical machine | Static management address | Root storage |
 | --- | --- | --- | --- |
-| pve-01 | M920 SFF, 64GB | 192.168.40.50/24 | 1TB, ext4 |
+| pve-01 | M920 SFF, 64GB | 192.168.40.50/24 | 2TB NVMe replacement ordered, ext4 planned |
 | pve-02 | M920x #1, 32GB | 192.168.40.55/24 | 1TB, ext4 |
 | pve-03 | M920x #2, 32GB | 192.168.40.58/24 | 1TB, ext4 |
 | pve-04 | M920q #1, 16GB | 192.168.40.59/24 | 512GB, ext4 |
@@ -103,6 +103,6 @@ Seven equal-vote members need four communicating votes. Loss of quorum restricts
 - [ ] Record switch ports, MACs, hostnames, IPs, and versions; save bookmarks and credentials securely.
 - [ ] Before production guest use, test VLAN 50 on pve-01 and pve-07 and VLAN 60 on pve-02 using disposable guests with unique IDs. Test VLAN 70 when first configured. Management reachability alone does not prove guest VLAN paths.
 
-Continue with Tier 0's guest-network tests, images, Huly, VyOS, OpenBao, and GPU preparation. Those are separate from this day-one completion gate.
+Continue with Tier 0's guest-network tests, images, VyOS, OpenBao, and GPU preparation. Those are separate from this day-one completion gate.
 
 Sources: [Proxmox installation](https://github.com/proxmox/pve-docs/blob/master/pve-installation.adoc), [cluster manager](https://github.com/proxmox/pve-docs/blob/master/pvecm.adoc), [network configuration](https://github.com/proxmox/pve-docs/blob/master/pve-network.adoc), [UniFi port VLAN assignment](https://help.ui.com/hc/en-us/articles/26136855808919-Switch-Port-VLAN-Assignment-Trunk-Access-Ports).

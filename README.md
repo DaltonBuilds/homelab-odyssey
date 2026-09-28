@@ -42,7 +42,7 @@ Start at the **[docs index](docs/README.md)**, which lays out the canonical buil
 | — | [Future Upgrades](docs/build/future-upgrades.md) | Deferred spikes (Nix, vLLM, state encryption, …) |
 | — | [Appendix](docs/build/appendix-open-items.md) | Open items from the consistency review |
 
-Project management is bootstrapped on **Huly** — see the [bootstrap guide](docs/bootstrap/huly-bootstrap.md) and the [work breakdown](huly/work-breakdown.md).
+Project tracking uses **YouTrack Cloud**, project **Homelab** (`HOMELAB`). See the [work breakdown](docs/build/work-breakdown.md); agent integration setup is pending.
 
 ---
 
@@ -62,7 +62,7 @@ This is an actively-built personal lab, not a turnkey product. **Every version p
 
 ## Security & publishing
 
-These docs contain architecture, internal RFC1918 addressing, and hostnames — but **no secrets**: keys, passwords, and tokens all live in OpenBao / `pass`, never in Git. A hardened [`.gitignore`](.gitignore) blocks the generated-secret artifacts (state, kubeconfigs, unseal material, `huly_v7.conf`, …) from ever being committed. If you fork this, keep that discipline.
+These docs contain architecture, internal RFC1918 addressing, and hostnames — but **no secrets**: keys, passwords, and tokens all live in OpenBao / `pass`, never in Git. A hardened [`.gitignore`](.gitignore) blocks the generated-secret artifacts (state, kubeconfigs, unseal material, …) from ever being committed. If you fork this, keep that discipline.
 
 ## License
 

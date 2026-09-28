@@ -1,50 +1,49 @@
-# Operation Long Haul v5 — Huly Work Breakdown
+# Operation Long Haul v5 — Work Breakdown
 
-[← Docs index](../docs/README.md) · companion to [Huly bootstrap](../docs/bootstrap/huly-bootstrap.md)
+[← Docs index](../README.md)
 
-This document translates the build docs into Huly work items. It is the source you type (or import) into the `Operation Long Haul` workspace after the [Huly bootstrap](../docs/bootstrap/huly-bootstrap.md) is up.
+This document translates the build docs into planned work items. Tracking uses YouTrack Cloud project `Homelab` (`HOMELAB`); the MCP integration is connected. This is a scope reference, not a record of live ticket status.
 
-**Scope discipline (per the bootstrap doc):** don't over-invest before building. **Tier 0 is fully broken down** below — that is what you enter first. Tiers 1–5 are intentionally left at **milestone + epic** granularity; explode each tier's stories at the start of that tier, when the detail is real and stable.
+**Scope discipline:** don't over-invest before building. **Tier 0 is fully broken down** below — that is what you enter first. Tiers 1–5 are intentionally left at **milestone + epic** granularity; explode each tier's stories at the start of that tier, when the detail is real and stable.
 
 ---
 
 ## Conventions
 
-**Hierarchy (maps the build doc onto Huly's model):**
+**Planning hierarchy (confirm tier grouping in YouTrack before importing):**
 
-| Build doc | Huly | Notes |
+| Build doc | Planning concept | Notes |
 |-----------|------|-------|
 | Tier | **Milestone** | 6 milestones: Tier 0–5 |
 | Thematic group of phases | **Capability** | optional grouping layer inside a milestone |
 | Phase (e.g. `0.5`) | **Epic** | title = phase title; ID prefix = phase number |
 | Phase sub-step / checklist item | **Story** or **Task** | Story if it has its own acceptance check; Task if it's a step of a Story |
-| "Verification / gate" phase | **Story** (type `Gate`, blocks the next milestone) | each tier ends with one |
+| "Verification / gate" phase | **Story** (label `gate`, blocks the next tier) | each tier ends with one |
 | Future-Upgrades item, Nix, vLLM, etc. | **Spike** | time-boxed investigation, own backlog below |
 
-**Issue types / labels:** `Epic`, `Story`, `Task`, `Spike`, `Gate`. Component labels reuse the platform vocabulary: `proxmox`, `network`, `openbao`, `k8s-prod`, `k8s-dev`, `k8s-mgmt`, `gitops`, `security`, `observability`, `identity`, `storage`, `dr`, `supply-chain`.
+**Issue types / labels:** `Epic`, `Story`, `Task`, `Spike`, `Bug`; use `gate` as a label. Component labels reuse the platform vocabulary: `proxmox`, `network`, `openbao`, `k8s-prod`, `k8s-dev`, `k8s-mgmt`, `gitops`, `security`, `observability`, `identity`, `storage`, `dr`, `supply-chain`.
 
-**Statuses:** `Backlog → Todo → In Progress → In Review → Done` (+ `Blocked`). A tier's **Gate** story stays `Blocked` until every epic in the milestone is `Done`; it blocks the next milestone.
+**Live Stage values (verified 2026-09-27):** `Backlog → Ready → In Progress → In Review → Done` (+ `Blocked`). A tier's **Gate** story stays `Blocked` until every epic in the milestone is `Done`; it blocks the next milestone.
 
-**IDs:** keep the phase number in the title (`[0.5] Initialize OpenBao HA cluster`) so a Huly item always round-trips to a build-doc section.
+**IDs:** keep the phase number in the title (`[0.5] Initialize OpenBao HA cluster`) so an issue always round-trips to a build-doc section.
 
 **Estimation:** size in half-days (`0.5, 1, 2, 3`) — this is a solo build; velocity is the point of tracking, not story points.
 
-> **TODO (do at bootstrap time):** check whether the current `huly-selfhost` release supports **CSV/bulk issue import**. If it does, generate a CSV from this file (columns: `type,identifier,title,parent,component,estimate`) and import rather than hand-entering ~40 Tier 0 items. If not, enter Tier 0 by hand (it's ~13 epics) and only skeleton the rest. Confirm against the upstream README — do not assume.
 
 ---
 
 ## Milestone: Tier 0 — Foundation *(fully broken down)*
 
-> **Epic 0.0 — Huly bootstrap** *(pre-work; you're reading its output)*
-> Stories: create `huly-bootstrap` VM · install Docker + Compose · deploy pinned Huly self-host · create `Operation Long Haul` workspace + Tier 0–5 milestones · first off-VM backup. Acceptance = the bootstrap doc's §7 exit criteria. Component: `proxmox`. → Then create the items below.
 
 ### Capability: Hypervisor & Network Fabric
+
+**Recovery scope (2026-09-27):** pve-01's failed 1TB SATA drive will be replaced by an ordered 2TB NVMe. Preserve historically completed installation/VLAN work; track the reinstall and cluster rejoin separately, then reinstall VyOS. See [pve-01 recovery](pve-01-recovery.md). Existing workload placement and guest disk budgets remain unchanged.
 
 **Epic [0.1] Proxmox on all physical hypervisors** — `proxmox`
 - Story: Install Proxmox VE (ext4 root) on pve-01, pve-02, pve-03, pve-04, pve-05, and pve-06. Tasks: one per host (pve-03 M920x #2; pve-04/05/06 M920q).
 - Story: Set management IPs + hostnames + `apt dist-upgrade` on all hosts.
 - Story: Configure `vmbr0` VLAN trunks per host (VLAN 50 on pve-04/05/06 **+ pve-07**; VLAN 70 on a capacity-checked existing host).
-- Story: Create `homelab-pve` on pve-01 and join the other six empty hosts before guest creation; reconcile node-local storage and cluster-wide guest IDs. Follow the [day-one checklist](../docs/build/proxmox-day-one.md).
+- Story: Create `homelab-pve` on pve-01 and join the other six empty hosts before guest creation; reconcile node-local storage and cluster-wide guest IDs. Follow the [day-one checklist](proxmox-day-one.md).
 - Story: Configure UniFi native VLAN 40 on host ports and tagged guest VLANs per the day-one matrix; preserve existing gateway/DNS access.
 - Story: Upload Ubuntu 24.04 cloud image + VyOS/Talos ISOs to the relevant pools.
 - Story (verify): all seven web UIs reachable; all seven members visible from one UI; quorum healthy; no HA-managed guests.
@@ -54,7 +53,7 @@ This document translates the build docs into Huly work items. It is the source y
 - Story: Install Proxmox VE with **ZFS RAID1 mirror** across both 2TB WD_BLACK SN850X NVMe (~1.8TiB usable); IP `192.168.40.66`; hostname `pve-07`. Verified 2026-09-13: matching SN850X 2000GB drives and ONLINE mirror with zero errors. Retain planned VM sizes and leave extra capacity uncommitted (ADR-011).
 - Story: Cap `zfs_arc_max` (~10GB) via `/etc/modprobe.d/zfs.conf` + `update-initramfs -u`; reboot. **The one step easiest to forget and most annoying to diagnose.**
 - Story: `vmbr0` trunk VLANs 40 + 50; upload Ubuntu cloud image **and** Talos `metal-amd64.iso`.
-- Story: GPU passthrough prep — `amd_iommu=on iommu=pt`, verify isolated IOMMU group, blacklist `nouveau`/`nvidia`, bind `vfio-pci`. **Do not install NVIDIA drivers on the host.**
+- Story: GPU passthrough prep — inspect firmware IOMMU, bootloader and PCI groups using the [preflight](pve-07-gpu-passthrough.md); bind the GPU functions to `vfio-pci` and prevent host NVIDIA drivers from claiming them. **Do not install NVIDIA drivers on the host.**
 - Story (verify): `zpool status` healthy 2-way mirror; `arc_summary` shows the cap; `lspci -nnk` shows `vfio-pci` on the GPU.
 - Note: the GPU is *prepared* here and *consumed* in Tier 5. Do not block Tier 0 on it.
 
@@ -145,13 +144,13 @@ Epics: [4.1] Flagger · [4.2] Kustomize overlays + Flux Kustomizations · ~~[4.3
 
 ## Milestone: Tier 5 — MLOps *(skeleton — external doc)*
 
-Detailed in a separate document (see [tier-5-mlops.md](../docs/build/tier-5-mlops.md)). Create the milestone now; add epics when that doc lands. Argo Workflows/Events live here only.
+Detailed in a separate document (see [tier-5-mlops.md](tier-5-mlops.md)). Create the milestone now; add epics when that doc lands. Argo Workflows/Events live here only.
 
 ---
 
 ## Cross-cutting epic: Ephemeral Environments
 
-Not a milestone — a cross-cutting epic (tag onto Tier 2/4 once Flux + Zarf exist). Stories: [A] In-cluster PR-preview namespaces (Flux, homelab-dev) · [B] Disposable Talos clusters on a capacity-checked existing host (OpenTofu + Flux + Zarf) with per-drill teardown. See [ephemeral-environments.md](../docs/build/ephemeral-environments.md).
+Not a milestone — a cross-cutting epic (tag onto Tier 2/4 once Flux + Zarf exist). Stories: [A] In-cluster PR-preview namespaces (Flux, homelab-dev) · [B] Disposable Talos clusters on a capacity-checked existing host (OpenTofu + Flux + Zarf) with per-drill teardown. See [ephemeral-environments.md](ephemeral-environments.md).
 
 ## Spike backlog (from Future Upgrades)
 
