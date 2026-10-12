@@ -12,7 +12,7 @@
 
 ### Tier 0 Phases
 
-- **0.1** — Proxmox installation on all seven physical hypervisors *(v5.4: pve-07 added)*
+- **0.1** — Proxmox installation, Ansible host baseline and secure remote management on all seven physical hypervisors
 - **0.2** — Switch / VLAN configuration verification
 - **0.3** — VyOS deployment and BGP fabric
 - **0.4** — Vault VM provisioning (bootstrap-mode, manual)
@@ -45,11 +45,11 @@
 
 Record the downloaded image builds and checksums. The [Ubuntu Server ISO](https://ubuntu.com/download/server) and [Ubuntu cloud image](https://cloud-images.ubuntu.com/releases/resolute/release/) are different artifacts.
 
-Optional: use the [post-install helper](proxmox-day-one.md#optional-post-install-helper) for repository setup and updates on each host. Follow its cluster-specific prompt guidance: retain Corosync and default HA services, while leaving guests out of automatic HA.
+**Expanded foundation scope (2026-10-03, ADR-013):** implement the [Ansible baseline and managed Tailscale remote-access plan](proxmox-baseline.md) before resuming substantial BGP/OpenBao work. Adopt existing hosts in place; pve-01 was recovered on 2026-10-10. The baseline works without OpenBao or VyOS. Keep the subscription reminder and replace recurring use of the community post-install helper with repository-owned roles. Router placement was decided on 2026-10-11 ([HOMELAB-37](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-37)): an unprivileged LXC on pve-03; see the baseline specification.
 
-#### pve-01 (M920 SFF, 64GB / 2TB NVMe replacement pending)
+#### pve-01 (M920 SFF, 64GB / 2TB NVMe — recovered 2026-10-10)
 
-Owner update 2026-09-27: the 1TB SATA drive failed and is considered unrecoverable. A 2TB NVMe replacement is ordered. Reinstall Proxmox with ext4 root, preserving hostname `pve-01` and IP `192.168.40.50`; follow the [recovery checklist](pve-01-recovery.md) to rejoin the existing cluster before recreating bgp-01. Do not create a new cluster.
+Owner update 2026-09-27: the 1TB SATA drive failed and is considered unrecoverable. It was replaced by a 2TB NVMe and pve-01 rejoined the cluster on 2026-10-10 ([HOMELAB-20](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-20)). For any future reinstall, use Proxmox with ext4 root, preserving hostname `pve-01` and IP `192.168.40.50`; follow the [recovery checklist](pve-01-recovery.md) to rejoin the existing cluster before recreating bgp-01. Do not create a new cluster.
 
 - [ ] Confirm pve-01 reachable at `192.168.40.50`
 - [ ] Update Proxmox to latest stable patch release: `apt update && apt dist-upgrade`
@@ -123,6 +123,8 @@ The former home-office workstation, reassigned to the fleet (ADR-011). This is t
 
 #### Verification
 
+- [ ] All seven hosts pass the Ansible baseline checks; a second convergence run has no unintended changes. Updates/reboots and disruptive operations remain explicit.
+- [ ] Restricted Tailscale remote UI, browser console and SSH access passes external-network tests; unauthorized access is denied and local recovery works with the router stopped. See the [baseline acceptance criteria](proxmox-baseline.md).
 - [ ] All seven Proxmox web UIs load from workstation
 - [ ] `ping` succeeds to every hypervisor management IP (`.50`, `.55`, `.58`, `.59`, `.64`, `.65`, `.66` on VLAN 40)
 - [ ] Ubuntu 26.04 cloud image + VyOS/Talos ISOs visible in the relevant Proxmox storage pools

@@ -37,9 +37,21 @@ This document translates the build docs into planned work items. Tracking uses Y
 
 ### Capability: Hypervisor & Network Fabric
 
-**Recovery scope (2026-09-27):** pve-01's failed 1TB SATA drive will be replaced by an ordered 2TB NVMe. Preserve historically completed installation/VLAN work; track the reinstall and cluster rejoin separately, then reinstall VyOS. See [pve-01 recovery](pve-01-recovery.md). Existing workload placement and guest disk budgets remain unchanged.
+**Recovery scope (2026-09-27):** pve-01's failed 1TB SATA drive was replaced by a 2TB NVMe; recovery completed 2026-10-10 (HOMELAB-20). Preserve historically completed installation/VLAN work; track the reinstall and cluster rejoin separately, then reinstall VyOS. See [pve-01 recovery](pve-01-recovery.md). Existing workload placement and guest disk budgets remain unchanged.
 
 **Epic [0.1] Proxmox on all physical hypervisors** — `proxmox`
+
+**Expanded scope (2026-10-03, ADR-013):** [Ansible baseline and secure remote management](proxmox-baseline.md). Preserve historical installation completion; expand/reopen the existing epic for these outcomes. Tier 0 is a document grouping; the live project has no Tier field.
+
+- Story: Implement a version-aware, idempotent Ansible PVE baseline with seven-host inventory, repository/SSH/time/DNS/notification configuration, reviewed access rules and pve-07 settings. Acceptance: syntax/check review, successful canary convergence and repeat run without unintended changes; bootstrap independent of OpenBao/VyOS.
+- Spike (two hours): Select the Tailscale entry-point placement against actual hardware, power, capacity and the full Flex switch. Acceptance: recorded device or VM/host fallback, validated network/resource plan, failure dependencies and local recovery path.
+- Story: Adopt surviving hosts and rebuilt pve-01 into the baseline. Acceptance: one-host-at-a-time rollout, seven verified members, healthy quorum, no HA-managed guests, retained storage/GPU/VLAN configuration and repeat convergence. Reuse HOMELAB-20 for hardware recovery; full rollout depends on it and the baseline story.
+- Story: Deploy restricted managed Tailscale Personal access and prove recovery. Acceptance: versioned policy and router config, only administrator access to seven PVE /32 addresses on 8006/22, external UI/console/SSH tests, denied unauthorized access, reboot/revocation tests and local access with router stopped. Depends on placement and fleet baseline; Headscale deferred.
+
+Tracker mapping: baseline [HOMELAB-36](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-36), placement [HOMELAB-37](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-37), fleet adoption [HOMELAB-38](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-38), remote verification [HOMELAB-39](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-39). All are children of [HOMELAB-3](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-3). Live statuses remain in YouTrack.
+
+**Existing installation scope:**
+
 - Story: Install Proxmox VE (ext4 root) on pve-01, pve-02, pve-03, pve-04, pve-05, and pve-06. Tasks: one per host (pve-03 M920x #2; pve-04/05/06 M920q).
 - Story: Set management IPs + hostnames + `apt dist-upgrade` on all hosts.
 - Story: Configure `vmbr0` VLAN trunks per host (VLAN 50 on pve-04/05/06 **+ pve-07**; VLAN 70 on a capacity-checked existing host).

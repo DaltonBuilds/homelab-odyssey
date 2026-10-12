@@ -57,6 +57,7 @@
 | vault-03 (Vault)       | 192.168.40.22   | 40   | Vault HA node 3                         | VM on pve-02    |
 | nfs-01             | 192.168.40.51   | 40   | NFS + ZFS persistent storage            | VM on pve-01    |
 | garage-01              | 192.168.40.53   | 40   | S3-compatible object storage            | LXC on pve-01   |
+| ts-router-01           | 192.168.40.13   | 40   | Tailscale subnet router for PVE management (guest 110) *(HOMELAB-37)* | LXC on **pve-03** |
 | mgmt-01 (mgmt CP)       | 192.168.40.60   | 40   | homelab-mgmt control plane                | VM on pve-01    |
 | mgmt-02 (mgmt CP)    | 192.168.40.61   | 40   | homelab-mgmt control plane                | VM on **pve-07** *(v5.4: was pve-01)* |
 | mgmt-03 (mgmt CP)     | 192.168.40.62   | 40   | homelab-mgmt control plane                | VM on pve-02    |
@@ -86,7 +87,7 @@
 > | Host lost | OpenBao Raft | homelab-mgmt etcd | Other impact |
 > | --- | --- | --- | --- |
 > | pve-01 | 2 of 3 — **quorum holds** | 2 of 3 — **quorum holds** | nfs-01 + garage-01 + bgp-01 + prod-w-03 down (storage outage; VRRP fails over to bgp-02) |
-> | pve-03 | 2 of 3 — **quorum holds** | unaffected | none standing |
+> | pve-03 | 2 of 3 — **quorum holds** | unaffected | Tailscale remote management down (ts-router-01); manage from the LAN or console |
 > | pve-07 | unaffected | 2 of 3 — **quorum holds** | prod-gpu-01 + build host down (no platform impact) |
 > | pve-02 | 2 of 3 — **quorum holds** | 2 of 3 — **quorum holds** | homelab-dev entirely down; bgp-02 down |
 >
@@ -105,4 +106,4 @@
 ---
 
 
-**pve-01 storage replacement (owner update 2026-09-27):** the 1TB SATA drive failed; a 2TB NVMe replacement is ordered, not installed. Keep the M920 SFF at `192.168.40.50` and retain all planned workload placements and guest disk budgets. Additional capacity adds headroom, not disk redundancy or a new failure domain. The failure-domain table above describes the intended completed platform, not currently deployed guests. See [recovery checklist](pve-01-recovery.md).
+**pve-01 storage replacement (owner update 2026-09-27):** the 1TB SATA drive failed and was replaced by a 2TB NVMe; pve-01 was reinstalled and rejoined `homelab-pve` on 2026-10-10 ([HOMELAB-20](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-20)). Keep the M920 SFF at `192.168.40.50` and retain all planned workload placements and guest disk budgets. Additional capacity adds headroom, not disk redundancy or a new failure domain. The failure-domain table above describes the intended completed platform, not currently deployed guests. See [recovery checklist](pve-01-recovery.md).

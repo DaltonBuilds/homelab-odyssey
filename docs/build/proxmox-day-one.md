@@ -2,13 +2,15 @@
 
 Accepted inventory and clustering decision: [ADR-012](01-adrs.md#adr-012--seven-confirmed-hosts-one-proxmox-cluster-unifi-bootstrap-2026-09-12). This checklist is the installation-day entry point; finish the remaining [Tier 0](tier-0-foundation.md) work afterward.
 
-**Build status (owner-provided verification, 2026-09-13):** all seven hosts are installed. `pvecm status` confirms seven expected members/votes, quorum four, and `Quorate: Yes`; IPs match the inventory. On pve-07, two WD_BLACK SN850X 2000GB drives form an ONLINE `mirror-0` with zero read/write/checksum errors and no known data errors; `df -h` reports ~1.8TiB available on the fresh pool. Keep the current VM sizes (ADR-011). Owner update 2026-09-27: all seven hosts were installed and clustered, VLAN tests passed, and pve-07 onboarding is complete except GPU passthrough. These are historical confirmations; pve-01 is now offline after its 1TB SATA drive failed. A 2TB NVMe replacement was ordered on 2026-09-27; installation and recovery are pending. See the [recovery checklist](pve-01-recovery.md).
+**Post-install direction (2026-10-03, ADR-013):** use the [Ansible baseline and restricted managed Tailscale plan](proxmox-baseline.md). The manual checks below define expected results and recovery fallbacks. Existing hosts are adopted in place; pve-01 follows its recovery checklist and joins the existing cluster. Keep the subscription reminder. Initial installation remains manual; the baseline and remote access are planned work until verified.
+
+**Build status (owner-provided verification, 2026-09-13):** all seven hosts are installed. `pvecm status` confirms seven expected members/votes, quorum four, and `Quorate: Yes`; IPs match the inventory. On pve-07, two WD_BLACK SN850X 2000GB drives form an ONLINE `mirror-0` with zero read/write/checksum errors and no known data errors; `df -h` reports ~1.8TiB available on the fresh pool. Keep the current VM sizes (ADR-011). Owner update 2026-09-27: all seven hosts were installed and clustered, VLAN tests passed, and pve-07 onboarding is complete except GPU passthrough. These are historical confirmations. pve-01's 1TB SATA drive later failed; it was reinstalled on a 2TB NVMe and rejoined the cluster on 2026-10-10 ([HOMELAB-20](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-20), [recovery checklist](pve-01-recovery.md)).
 
 ## 1. Confirm labels and addresses
 
 | Host | Physical machine | Static management address | Root storage |
 | --- | --- | --- | --- |
-| pve-01 | M920 SFF, 64GB | 192.168.40.50/24 | 2TB NVMe replacement ordered, ext4 planned |
+| pve-01 | M920 SFF, 64GB | 192.168.40.50/24 | 2TB NVMe (replaced 2026-10), ext4 |
 | pve-02 | M920x #1, 32GB | 192.168.40.55/24 | 1TB, ext4 |
 | pve-03 | M920x #2, 32GB | 192.168.40.58/24 | 1TB, ext4 |
 | pve-04 | M920q #1, 16GB | 192.168.40.59/24 | 512GB, ext4 |
@@ -52,6 +54,8 @@ Native VLAN 40 means the host sends management traffic untagged. The management 
 
 ### Optional post-install helper
 
+**Historical procedure:** the owner-approved Ansible baseline replaces recurring helper use. Retain this section to explain earlier host changes; do not use the helper as the new convergence procedure or remove the subscription reminder.
+
 The owner uses the community-maintained [Proxmox VE Post Install helper](https://community-scripts.org/scripts?q=post+install&preview=post-pve-install). Run in each Proxmox host's root shell after network/DNS access works, before joining; it can handle the repository/update step above:
 
 ```bash
@@ -60,7 +64,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/Proxmo
 
 This runs third-party code from a changing `main` branch as root; review the [source](https://github.com/community-scripts/ProxmoxVE/blob/main/tools/pve/post-pve-install.sh) and record execution date, choices, and resulting version. Source checked 2026-09-12 accepts PVE 9.2.x. It also loads a telemetry helper.
 
-For this lab, without a subscription: disable enterprise, enable/keep No-Subscription, skip unused Ceph and test repositories. Subscription-dialog removal is optional and patches UI files. Choose **No** to **Disable high availability?** and **No** to **Disable Corosync?** if shown. Leave default services intact; no HA-managed guests is a separate setting. If previously disabled, restore cluster services before joining; do not assume the helper left them enabled. Update/reboot one member at a time once clustered, preserving quorum.
+For this lab, without a subscription: disable enterprise, enable/keep No-Subscription, skip unused Ceph and test repositories. Retain the subscription dialog; removal patches UI files. Choose **No** to **Disable high availability?** and **No** to **Disable Corosync?** if shown. Leave default services intact; no HA-managed guests is a separate setting. If previously disabled, restore cluster services before joining; do not assume the helper left them enabled. Update/reboot one member at a time once clustered, preserving quorum.
 
 Verify update results: the script can print completion after an APT failure. Check `apt update`, `pveversion -v`, rebooted UI access, and `pvecm status` after joining. Successful helper execution does not replace the acceptance checks.
 

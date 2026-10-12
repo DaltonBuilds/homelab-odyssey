@@ -56,7 +56,7 @@ _(start)_  ·  [ADRs →](01-adrs.md)
 > - **Ephemeral** — `eph-<purpose>-<n>` (disposable Talos clusters, OpenTofu-provisioned on a capacity-checked existing host, no standing footprint)
 >
 > **Hypervisor inventory (corrected 2026-09-12 — Proxmox on every physical node, seven hosts):**
-> - **pve-01** — ThinkCentre M920 SFF (64GB / 2TB NVMe replacement ordered; installation pending) — platform-adjacent (mgmt + prod-adjacent VMs)
+> - **pve-01** — ThinkCentre M920 SFF (64GB / 2TB NVMe — recovered and rejoined 2026-10-10, HOMELAB-20) — platform-adjacent (mgmt + prod-adjacent VMs)
 > - **pve-02** — ThinkCentre M920x #1 (32GB / 1TB) — dev/staging
 > - **pve-03** — ThinkCentre M920x #2 (32GB / 1TB) *(v5.2 — role assigned)* — spare capacity; hosts the relocated **vault-02** *(v5.4)*
 > - **pve-04 / pve-05 / pve-06** — 3× ThinkCentre M920q (16GB / 512GB each) *(v5.2 — were bare-metal Ubuntu)* — each hosts exactly one homelab-prod node VM (prod-cp-01, prod-w-01, prod-w-02)
@@ -128,7 +128,7 @@ This lab serves **two missions on different timelines**, and every technology ch
 
 Confirm alignment before starting:
 
-- [ ] **Hypervisors:** every physical box runs Proxmox VE — pve-01 (M920 SFF, 64GB/2TB NVMe planned; awaiting replacement) + pve-02 (M920x #1, 32GB/1TB) + pve-03 (M920x #2, 32GB/1TB) + pve-04/pve-05/pve-06 (3× M920q, 16GB/512GB, one homelab-prod node VM each) + **pve-07 (tower: Ryzen 9 7900X, 64GB, 2× 2TB WD_BLACK SN850X NVMe ZFS mirror ≈1.8TiB usable, RTX 5070)**. One seven-member Proxmox cluster, `homelab-pve`, with no HA-managed guests initially (ADR-012). *(v5.2: M920q + M920x #2 moved from bare-metal Ubuntu to Proxmox — every K8s node is now a VM. See ADR-008. v5.4: pve-07 added — see ADR-011.)*
+- [ ] **Hypervisors:** every physical box runs Proxmox VE — pve-01 (M920 SFF, 64GB/2TB NVMe; recovered 2026-10-10) + pve-02 (M920x #1, 32GB/1TB) + pve-03 (M920x #2, 32GB/1TB) + pve-04/pve-05/pve-06 (3× M920q, 16GB/512GB, one homelab-prod node VM each) + **pve-07 (tower: Ryzen 9 7900X, 64GB, 2× 2TB WD_BLACK SN850X NVMe ZFS mirror ≈1.8TiB usable, RTX 5070)**. One seven-member Proxmox cluster, `homelab-pve`, with no HA-managed guests initially (ADR-012). *(v5.2: M920q + M920x #2 moved from bare-metal Ubuntu to Proxmox — every K8s node is now a VM. See ADR-008. v5.4: pve-07 added — see ADR-011.)*
 - [ ] **Single workstation:** the MacBook Pro (M2 Max, arm64) is the *only* workstation. The former Fedora tower is now pve-07; no workstation VM is retained on it. This is load-bearing — `pass`, the root CA trust store, the fleet-wide cloud-init SSH key, and Vault SSH OTP all assume exactly one trusted endpoint. *(v5.4 — ADR-011)*
 - [ ] **GPU capacity:** one RTX 5070 on pve-07, passed through to a single VM (`prod-gpu-01`, tainted, joined to homelab-prod). No vGPU, no MIG — in-cluster sharing is device-plugin time-slicing only, with no memory or fault isolation. 12GB VRAM ceiling; >12GB workloads still burst to AWS `g5.xlarge`. *(v5.4 — ADR-011)*
 - [ ] **CNI:** Cilium on both workload clusters, BGP control plane enabled, kube-proxy replacement, Gateway API

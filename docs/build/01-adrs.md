@@ -219,3 +219,15 @@ The owner confirmed VLAN 40 gateway **192.168.40.1** belongs to UniFi. Proxmox a
 ### ADR-012 addendum — Installed sequential hostnames (2026-09-13)
 
 The owner installed the six Lenovo hosts as pve-01 through pve-06 and assigned the remaining Ryzen tower pve-07. Active documentation now follows those installed names throughout, superseding the earlier instruction to retain numbering gaps. The [day-one inventory](proxmox-day-one.md#1-confirm-labels-and-addresses) is canonical: M920x #2 is pve-03 at .58; the M920q trio are pve-04/.59, pve-05/.64, and pve-06/.65; the tower is pve-07/.66. IPs and physical workload placements are unchanged. This is a documentation reconciliation, not an instruction to rename installed cluster members. Archived v3/v4 documents retain their historical content.
+
+## ADR-013 — Proxmox baseline in Ansible and managed Tailscale access (2026-10-03)
+
+**Status:** Accepted by the owner; implementation pending. Expands Phase 0.1 without superseding ADR-012's cluster or network decisions.
+
+**Decision:** retain manual firmware/disk selection and USB installation initially; codify post-install host configuration in Ansible. Keep disruptive network changes, upgrades/reboots and cluster membership operations explicit and checked. Adopt existing hosts in place, using pve-01 recovery to prove the fresh-install path. Keep bootstrap access independent of OpenBao and higher-tier services.
+
+Use managed Tailscale's free Personal plan for restricted remote management; defer Headscale. Prefer an independent subnet router, with placement investigated against actual equipment and switch capacity before deployment. If unavailable, record the failure dependency of a dedicated VM or selected host-based fallback. Restrict access to the administrator and the PVE management addresses/ports, retain PVE authentication/MFA and local recovery access, and keep management ports off the public internet.
+
+**Rationale:** seven hosts need repeatable configuration and recovery before the lab grows. A self-hosted coordination service adds bootstrap and recovery dependencies without a current requirement. The subscription reminder does not affect repository access and is retained to avoid recurring UI patches.
+
+**Consequences:** expand Epic [0.1] with baseline, placement, rollout and remote-access work while preserving completed installation history. BGP may be replayed through Phase 0.3 after baseline adoption; a fleet wipe is not required. Hardware-based out-of-band recovery remains a separate future capability. See the [baseline specification](proxmox-baseline.md) for acceptance criteria, execution order and current vendor references.

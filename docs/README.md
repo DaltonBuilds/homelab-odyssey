@@ -9,12 +9,13 @@ This is the entry point for the build. Work through the tiers **sequentially** �
 ## Reference (read first / keep open)
 
 - [Overview](build/00-overview.md) — **Purpose & Mandate (the lab's two missions — read this first)**, v3→v5.4 changelog, architecture diagram, hardware inventory, Pre-Flight decisions
-- [Architecture Decision Records](build/01-adrs.md) — ADR-001 … ADR-011
+- [Architecture Decision Records](build/01-adrs.md) — ADR-001 … ADR-013
+- [Proxmox baseline and remote management](build/proxmox-baseline.md) — Phase 0.1 Ansible adoption, managed Tailscale and recovery checks
 - [Network Reference](build/02-network-reference.md) — VLAN plan, BGP ASNs, IP allocation, LB pools
 
 ## Canonical build order
 
-0. **Project tracking — YouTrack Cloud** — project `Homelab` (`HOMELAB`); agent integration setup is pending. See the [work breakdown](build/work-breakdown.md).
+0. **Project tracking — YouTrack Cloud** — project `Homelab` (`HOMELAB`); the MCP integration is connected. See the [work breakdown](build/work-breakdown.md).
 1. [Tier 0 · Foundation](build/tier-0-foundation.md) — Proxmox on all seven nodes (incl. pve-07 + GPU passthrough prep), VLANs across both switches, VyOS BGP fabric, OpenBao HA + engines
 2. [Tier 1 · Platform Provisioning](build/tier-1-platform-provisioning.md) — OpenTofu/Ansible with Vault auth, storage tier, RKE2 (prod/dev) + Talos (mgmt)
 3. [Tier 2 · Platform Services](build/tier-2-platform-services.md) — Cilium BGP + DNS, ESO, cert-manager, Harbor, Flux, Zarf, Kyverno, supply chain
