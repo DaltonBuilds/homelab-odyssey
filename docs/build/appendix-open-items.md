@@ -10,8 +10,8 @@ A full-document consistency sweep was run in August 2026. Most findings were fix
 
 ### Decisions needed
 
-1. ~~**Hypervisor failure domain** *(highest impact)* — pve-01 carries 2 of 3 OpenBao nodes and 2 of 3 mgmt control-plane nodes.~~ **RESOLVED (v5.4 — [ADR-011](01-adrs.md)):** `vault-02` → pve-03 and `mgmt-02` → **pve-07**, split across two different hosts so no single hypervisor loss breaks either quorum. The ⚠ callout under "IP allocation" is now a resolved note with a post-mitigation failure table, and a single-host-loss drill was added to the Tier 1 gate. *(Note: this went one better than the callout's own Option 1, which put both nodes on pve-03 and would have just relocated the correlated failure.)*
-2. ~~**M920x #2 role**~~ **RESOLVED** — assigned as `pve-03` in v5.2; it now hosts the relocated `vault-02` (v5.4).
+1. ~~**Hypervisor failure domain** *(highest impact)* — pve-01 carries 2 of 3 OpenBao nodes and 2 of 3 mgmt control-plane nodes.~~ **RESOLVED (v5.4 — [ADR-011](01-adrs.md)):** `vault-02` → pve-03 and `mgmt-02` → **pve-07**, split across two different hosts so no single hypervisor loss breaks either quorum. The ⚠ callout under "IP allocation" is now a resolved note with a post-mitigation failure table, and a single-host-loss drill was added to the Tier 1 gate. *(Note: this went one better than the callout's own Option 1, which put both nodes on pve-03 and would have just relocated the correlated failure.)* *(2026-10-28: nodes renumbered to match hosts: vault-02 on pve-02, vault-03 on pve-03.)*
+2. ~~**M920x #2 role**~~ **RESOLVED** — assigned as `pve-03` in v5.2; it now hosts the relocated `vault-03` (v5.4; renumbered from `vault-02` on 2026-10-28).
 3. **Inventory confirmed (2026-09-12, ADR-012):** one M920 SFF, two M920x, three M920q, and the Ryzen tower. The NUC entries were erroneous and removed. Record actual MAC addresses, switch ports, and wall-jack paths during installation; retain existing real-host IP assignments.
 
 ### Authoring work still outstanding

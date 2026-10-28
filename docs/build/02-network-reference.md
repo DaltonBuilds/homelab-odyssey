@@ -53,8 +53,8 @@
 | UniFi gateway | 192.168.40.1 | 40 | Confirmed Proxmox/platform gateway; DNS if enabled | UniFi |
 | bgp-vrrp (virtual) | 192.168.40.12 | 40 | VRRP next hop for LB routes (live 2026-10-28) | Floats bgp-01↔bgp-02 |
 | vault-01 (Vault)       | 192.168.40.20   | 40   | Vault HA node 1 (Raft leader candidate) | VM on pve-01    |
-| vault-02 (Vault)       | 192.168.40.21   | 40   | Vault HA node 2                         | VM on **pve-03** *(v5.4: was pve-01)* |
-| vault-03 (Vault)       | 192.168.40.22   | 40   | Vault HA node 3                         | VM on pve-02    |
+| vault-02 (Vault)       | 192.168.40.21   | 40   | Vault HA node 2                         | VM on pve-02 *(2026-10-28: was pve-03)* |
+| vault-03 (Vault)       | 192.168.40.22   | 40   | Vault HA node 3                         | VM on **pve-03** *(2026-10-28: was pve-02)* |
 | nfs-01             | 192.168.40.51   | 40   | NFS + ZFS persistent storage            | VM on pve-01    |
 | garage-01              | 192.168.40.53   | 40   | S3-compatible object storage            | LXC on pve-01   |
 | ts-router-01           | 192.168.40.13   | 40   | Tailscale subnet router for PVE management (guest 110) *(HOMELAB-37)* | LXC on **pve-03** |
@@ -77,7 +77,7 @@
 >
 > **The decision (ADR-011).** Split the two relocated quorum nodes across **two different** hosts:
 >
-> - **vault-02 → pve-03** (M920x #2, 32GB — ample headroom for one OpenBao node)
+> - **vault-03 → pve-03** (M920x #2, 32GB — ample headroom for one OpenBao node) *(decided as vault-02 → pve-03; renumbered 2026-10-28 so vault-0N lives on pve-0N, with vault-02 on pve-02)*
 > - **mgmt-02 → pve-07** (the tower, 64GB, mirrored NVMe — good etcd storage and the most headroom in the fleet)
 >
 > The Location cells above are updated accordingly. This is **strictly better than the old "Option 1,"** which put both nodes on pve-03 and merely relocated the correlated-failure problem: with the split, no single hypervisor loss can break either quorum. Both quorums now tolerate any one host failure, and ephemeral drills must fit available fleet capacity (ADR-012).

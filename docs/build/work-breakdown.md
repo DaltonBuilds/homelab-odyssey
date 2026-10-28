@@ -86,7 +86,7 @@ Tracker mapping: baseline [HOMELAB-36](https://daltonbuilds.youtrack.cloud/issue
 ### Capability: Secrets Substrate (OpenBao)
 
 **Epic [0.4] OpenBao VM provisioning (bootstrap mode)** — `openbao`
-- Story: Hand-create vault-01 (pve-01) + **vault-02 (pve-03)** + vault-03 (pve-02) from Ubuntu ISO, cloud-init (static IP, SSH key, no password auth). *(v5.4: vault-02 moved off pve-01 per ADR-011 — no hypervisor hosts two Raft nodes.)*
+- Story: Hand-create vault-01 (pve-01) + vault-02 (pve-02) + **vault-03 (pve-03)** from Ubuntu ISO, cloud-init (static IP, SSH key, no password auth). *(v5.4: one node moved off pve-01 per ADR-011 — no hypervisor hosts two Raft nodes; renumbered 2026-10-28 so names match hosts.)*
 - Story: Baseline hardening — disable swap, sshd hardening, chrony, host firewall (SSH + Vault API from VLAN 40 only).
 - Story: Install pinned OpenBao 2.6.x `.deb` on all three; service present, not yet enabled.
 

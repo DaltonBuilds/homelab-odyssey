@@ -6,7 +6,7 @@
 
 ## Tier 0 — Foundation
 
-**Purpose:** Establish the substrate everything else depends on. By the end of Tier 0, you have all seven physical hypervisors online (pve-01/02 standing platform + dev, pve-03 spare + vault-02 host, pve-04/05/06 hosting the homelab-prod node VMs, pve-07 GPU + build + mgmt-02 host), a redundant BGP routing fabric, and a fully-configured OpenBao HA cluster with PKI, Transit, SSH OTP, and Database engines ready to issue credentials. **No Kubernetes exists yet.** Nothing in higher tiers can begin until Tier 0 verification passes.
+**Purpose:** Establish the substrate everything else depends on. By the end of Tier 0, you have all seven physical hypervisors online (pve-01/02 standing platform + dev, pve-03 spare + vault-03 host, pve-04/05/06 hosting the homelab-prod node VMs, pve-07 GPU + build + mgmt-02 host), a redundant BGP routing fabric, and a fully-configured OpenBao HA cluster with PKI, Transit, SSH OTP, and Database engines ready to issue credentials. **No Kubernetes exists yet.** Nothing in higher tiers can begin until Tier 0 verification passes.
 
 **Why this tier exists separately:** v3 treated Vault as an application — Phase 6, after the cluster existed. That created a circular dependency (Ansible needed secrets to build the cluster; Vault lived in the cluster Ansible built). v4 inverts this: Vault is foundation, every later tier consumes it.
 
@@ -38,7 +38,7 @@
 
 | Media | Hosts | Planned use |
 | --- | --- | --- |
-| Ubuntu Server 26.04.1 live-server ISO | pve-01, pve-02, pve-03 | Manual installs of vault-01, vault-03, vault-02 |
+| Ubuntu Server 26.04.1 live-server ISO | pve-01, pve-02, pve-03 | Manual installs of vault-01, vault-02, vault-03 |
 | VyOS LTS ISO | pve-01, pve-02 | bgp-01, bgp-02 |
 | Talos `metal-amd64.iso` | pve-01, pve-02, pve-07 | mgmt-01, mgmt-03, mgmt-02 |
 | Ubuntu Server 26.04 amd64 cloud image | pve-01 through pve-07, before those VMs are provisioned | Later Ubuntu cloud-init VMs |
@@ -70,7 +70,7 @@ Owner update 2026-09-27: the 1TB SATA drive failed and is considered unrecoverab
 
 #### pve-03 (M920x #2, 32GB / 1TB — spare + quorum) *(v5.2)*
 
-Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacity plus the home of the relocated **`vault-02`** *(v5.4: decided — `mgmt-02` went to pve-07 instead, so the two relocated quorum nodes sit on different hosts. See ADR-011 and the resolved failure-domain note in Network Architecture.)*
+Formerly the unassigned "spare" M920x. Now a standing Proxmox host: idle capacity plus the home of the relocated **`vault-03`** *(renumbered from `vault-02` on 2026-10-28)* *(v5.4: decided — `mgmt-02` went to pve-07 instead, so the two relocated quorum nodes sit on different hosts. See ADR-011 and the resolved failure-domain note in Network Architecture.)*
 
 - [ ] Install Proxmox VE on the 1TB SSD, ext4 root
 - [ ] Management IP `192.168.40.58`, gateway `192.168.40.1` (UniFi, confirmed); hostname `pve-03`; apt update + dist-upgrade
@@ -312,10 +312,10 @@ For each (specs are identical):
 | VM         | Hypervisor | vCPU | RAM | Disk | IP             |
 | ---------- | ---------- | ---- | --- | ---- | -------------- |
 | vault-01   | pve-01  | 2    | 2GB | 20GB | 192.168.40.20  |
-| vault-02   | **pve-03** *(v5.4: was pve-01)* | 2    | 2GB | 20GB | 192.168.40.21  |
-| vault-03   | pve-02  | 2    | 2GB | 20GB | 192.168.40.22  |
+| vault-02   | pve-02  | 2    | 2GB | 20GB | 192.168.40.21  |
+| vault-03   | **pve-03** *(2026-10-28: renumbered; vault-02 was here)* | 2    | 2GB | 20GB | 192.168.40.22  |
 
-> **One Raft node per hypervisor *(v5.4 — ADR-011)*.** `vault-02` moved off pve-01 so no single hypervisor hosts two of the three OpenBao nodes. Do not "simplify" this back onto pve-01 while hand-creating the VMs — the whole point of the Tier 1 single-host-loss drill is that this spread holds. `mgmt-02` moves to pve-07 in the same change.
+> **One Raft node per hypervisor *(v5.4 — ADR-011)*.** One node moved off pve-01 to pve-03 so no single hypervisor hosts two of the three OpenBao nodes; on 2026-10-28 the names were renumbered so `vault-0N` lives on `pve-0N`. Do not "simplify" this back onto pve-01 while hand-creating the VMs — the whole point of the Tier 1 single-host-loss drill is that this spread holds. `mgmt-02` moves to pve-07 in the same change.
 
 - [ ] Create each VM in Proxmox UI from the Ubuntu Server 26.04.1 live-server amd64 ISO
 - [ ] Configure cloud-init with hostname, static IP on VLAN 40, your SSH key, `dalton` user with sudo, password auth disabled

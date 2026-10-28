@@ -488,7 +488,7 @@ module "homelab_dev_node" {
 }
 ```
 
-> **Resource sanity check for M920x (32GB total):** dev-cp-01 (CP) at 8GB + dev-w-01/dev-w-02 (workers) at 6GB each = 20GB for homelab-dev. Plus vault-03 (2GB) + bgp-02 (1GB) + mgmt-03 (6GB) = 29GB allocated, ~3GB headroom for the host. Tight but workable. CP gets more headroom than workers because etcd is memory-sensitive.
+> **Resource sanity check for M920x (32GB total):** dev-cp-01 (CP) at 8GB + dev-w-01/dev-w-02 (workers) at 6GB each = 20GB for homelab-dev. Plus vault-02 (2GB) + bgp-02 (1GB) + mgmt-03 (6GB) = 29GB allocated, ~3GB headroom for the host. Tight but workable. CP gets more headroom than workers because etcd is memory-sensitive.
 
 #### 1.3d — Environment: homelab-mgmt (three HA VMs split across hypervisors)
 
@@ -1382,7 +1382,7 @@ kubectx homelab-mgmt   # context for observability + identity
 - [ ] **homelab-prod** (prod): 4 nodes Ready, Cilium healthy, kube-proxy replacement = Strict, WireGuard encryption on, BGP CP enabled, audit log writing, etcd secrets encryption verified. *(v5.4: `prod-gpu-01` is provisioned as a VM but deliberately **not** joined until Tier 5 — so 4 Ready is correct here, becoming 5 at the Tier 5 gate. See ADR-011.)*
 - [ ] **homelab-dev** (dev/staging): 3 nodes Ready, same Cilium and audit features active
 - [ ] **Mgmt-plane**: 3 nodes Ready (HA), etcd quorum tested by stopping 1 node and confirming continued operation, all 3 nodes back online after restart
-- [ ] **Quorum spread verified** *(v5.4)*: `mgmt-01`/`mgmt-02`/`mgmt-03` are on pve-01/pve-07/pve-02 and `vault-01`/`vault-02`/`vault-03` are on pve-01/pve-03/pve-02 — no hypervisor hosts two nodes of either quorum. Confirm in the Proxmox UI, not just in the OpenTofu plan
+- [ ] **Quorum spread verified** *(v5.4)*: `mgmt-01`/`mgmt-02`/`mgmt-03` are on pve-01/pve-07/pve-02 and `vault-01`/`vault-02`/`vault-03` are on pve-01/pve-02/pve-03 — no hypervisor hosts two nodes of either quorum. Confirm in the Proxmox UI, not just in the OpenTofu plan
 - [ ] **Single-host loss drill** *(v5.4)*: power off pve-01, confirm OpenBao stays unsealed and serving *and* the mgmt cluster stays responsive (both at 2 of 3), then power it back on and confirm both nodes rejoin. This is the drill the pre-v5.4 layout could not have passed
 - [ ] All three kubeconfigs in `pass`, contexts labeled `homelab-prod` / `homelab-dev` / `mgmt`, `kubectx` switches between them cleanly
 
