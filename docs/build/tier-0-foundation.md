@@ -147,7 +147,7 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 - [ ] Confirm the **inter-switch link** carries 10/40/50/60 and matches native VLAN settings at both ends; add 70 before ephemeral use. Preserve existing switch/AP management.
 - [ ] Create VLAN interfaces on the edge router for VLANs 50 and 60 (if not already present for 10/40)
 - [ ] Confirm the owner-adjusted DHCP ranges on VLANs 40, 50, 60, and 70 leave planned static addresses and VIPs outside the pools. VLANs 50 and 60 need DHCP for disposable first-boot tests; later workload VMs use static cloud-init addressing. Exclude `192.168.40.12` and each planned `*.240–255` LoadBalancer block. A future VIP has no client MAC to reserve in UniFi; an out-of-range address is sufficient.
-- [ ] Prepare `/28` static routes on the edge router for the three LoadBalancer blocks below. These `/28` destinations sit inside the VLAN `/24` networks and do not change their subnet masks. Apply the routes only after the VyOS VRRP next hop is live in Phase 0.3:
+- [x] Prepare `/28` static routes on the edge router for the three LoadBalancer blocks below. These `/28` destinations sit inside the VLAN `/24` networks and do not change their subnet masks. Apply the routes only after the VyOS VRRP next hop is live in Phase 0.3. *Applied 2026-10-28 ([HOMELAB-18](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-18)) in UniFi under Settings → Routing → Create New Route → Static, type Next Hop. Clients on the same VLAN as a block do not use these routes; see [HOMELAB-42](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-42).*
   - `192.168.50.240/28 → 192.168.40.12`
   - `192.168.60.240/28 → 192.168.40.12`
   - `192.168.40.240/28 → 192.168.40.12`
@@ -173,17 +173,20 @@ This is the most boring and most critical phase. BGP, cluster separation, everyt
 
 **Goal:** Two VyOS routers running, peered with each other via iBGP, providing a VRRP next hop for the LoadBalancer routes on VLAN 40, ready to peer with Cilium speakers in Tier 2.
 
-**Confirmed gateway correction (2026-09-12):** UniFi owns `192.168.40.1`; the planned VyOS VLAN 40 VIP is now `192.168.40.12`. Before assigning .12, confirm it is unused in UniFi and outside the DHCP range; no preexisting client MAC is needed for a DHCP-range exclusion. Proxmox and platform guests retain UniFi as their gateway. Before deploying the VLAN 50/60 VRRP examples below, verify their .1 addresses are not already owned by UniFi; their ownership has not yet been confirmed.
+**Confirmed gateway correction (2026-09-12):** UniFi owns `192.168.40.1`; the planned VyOS VLAN 40 VIP is now `192.168.40.12`. Before assigning .12, confirm it is unused in UniFi and outside the DHCP range; no preexisting client MAC is needed for a DHCP-range exclusion. Proxmox and platform guests retain UniFi as their gateway. **Confirmed 2026-10-28:** UniFi also owns `.1` and is the gateway on VLANs 50 and 60, so VyOS runs a VRRP group on VLAN 40 only.
+
+> **As built (2026-10-28, [HOMELAB-17](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-17)–[19](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-19)).** Both routers run VyOS `2026.10.07-0712-rolling` and are configured by the `vyos_router` Ansible role in [homelab-infra](https://github.com/DaltonBuilds/homelab-infra) (`ansible/playbooks/vyos-router.yaml`). That role is the source of truth for the configuration; 0.3b below shows the equivalent commands. Ansible reaches the routers over SSH through the Tailscale subnet router, which advertises `.10`/`.11` (never the VIP `.12`). Open Tier 2 decisions on LoadBalancer reachability and the peering path are tracked in [HOMELAB-42](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-42).
 
 #### 0.3a — Provision both VyOS VMs
 
 For each VyOS VM, use the Proxmox UI for this one (Terraform won't manage Tier 0 infrastructure — that would create the same circular dependency we're eliminating with Vault):
 
-- [ ] **bgp-01** on pve-01: 1 vCPU, 1GB RAM, 8GB disk, virtual NIC on `vmbr0` with untagged/native VLAN 40 and tagged VLANs 50/60 passed as a trunk (no Proxmox access VLAN tag); VyOS handles the 50/60 sub-interfaces. Boot from VyOS ISO.
-- [ ] **bgp-02** on pve-02: same specs
-- [ ] Install VyOS to disk on both (`install image` in the live ISO console)
-- [ ] On first reboot, set a different password on each router, establish SSH access, and add a known SSH public key using the bootstrap sequence below
-- [ ] Snapshot both VMs in Proxmox after verifying the fresh install and access — gives you a clean restore point before VRRP/BGP changes
+- [x] **bgp-01** (guest 100) on pve-01: 1 vCPU, 1GB RAM, 8GB disk, virtual NIC on `vmbr0` with untagged/native VLAN 40 and tagged VLANs 50/60 passed as a trunk (no Proxmox access VLAN tag). The trunk leaves room for VLAN 50/60 sub-interfaces; none are configured yet (see 0.3b). Boot from VyOS ISO.
+- [x] **bgp-02** (guest 102) on pve-02: same specs
+- [x] Install VyOS to disk on both (`install image` in the live ISO console)
+- [x] On first reboot, set a different password on each router, establish SSH access, and add a known SSH public key using the bootstrap sequence below
+- [x] Snapshot both VMs in Proxmox after verifying the fresh install and access (`fresh-install`) — gives you a clean restore point before VRRP/BGP changes
+- [x] Run the same build on both routers. Rolling builds change between snapshots. bgp-02 was installed from an older ISO (`2026.09.17`) and upgraded on 2026-10-28 with `add system image <iso-url>` and a reboot; the ISO left in a VM's CD drive is not what it boots (disk is first in the boot order). `show system image` shows the installed images. The Ansible preflight refuses a router that is not on the pinned build.
 
 **Validated console-to-SSH bootstrap (2026-09-20):** Proxmox noVNC did not provide usable paste into the VyOS text console. Do the short network setup in each VM's console, then use the workstation's terminal for the longer configuration. In Proxmox, check **VM → Hardware → Network Device**: bridge `vmbr0`, no Proxmox VLAN access tag. Check **host → System → Network**: `vmbr0` is VLAN aware. The switch path must carry native VLAN 40 and tagged VLANs 50/60. `vmbr0` alone does not prove the trunk is correct.
 
@@ -217,74 +220,78 @@ Open a new SSH session to each router to verify key login before relying on it. 
 
 #### 0.3b — Base VyOS configuration
 
-On each VyOS router, apply the base config. **bgp-01 example** (`bgp-02` is symmetric with priority lowered):
+Apply with Ansible from homelab-infra, standby router first:
+
+```bash
+mise exec -- ansible-playbook ansible/playbooks/vyos-router.yaml --check --diff --limit bgp-02
+mise exec -- ansible-playbook ansible/playbooks/vyos-router.yaml --diff --limit bgp-02
+mise exec -- ansible-playbook ansible/playbooks/vyos-router.yaml --diff
+```
+
+The role sends only the lines missing from the running config, commits them with a comment, and saves. A second run reports no changes. The equivalent configuration on **bgp-01**:
 
 ```bash
 configure
 
-# Hostname
-set system host-name bgp-01
+# Hostname, and a resolver: without one the default time*.vyos.net NTP servers never resolve
+set system host-name 'bgp-01'
+set system name-server '192.168.40.1'
 
-# Management is untagged/native VLAN 40 on eth0; only VLANs 50/60 are tagged.
+# Management is untagged/native VLAN 40 on eth0; UniFi stays the default gateway
 set interfaces ethernet eth0 address '192.168.40.10/24'
-set interfaces ethernet eth0 vif 50 address '192.168.50.2/24'
-set interfaces ethernet eth0 vif 60 address '192.168.60.2/24'
+set protocols static route 0.0.0.0/0 next-hop '192.168.40.1'
 
-# VRRP — shared virtual IP per VLAN, bgp-01 is master (priority 200), bgp-02 backup (priority 100)
-set high-availability vrrp group VLAN40 interface eth0
-set high-availability vrrp group VLAN40 vrid 40
-set high-availability vrrp group VLAN40 priority 200
+# LoadBalancer blocks UniFi routes to the VIP. Until BGP learns them, drop them here instead of
+# looping back to UniFi through the default route. Distance 254 loses to any BGP route.
+set protocols static route 192.168.40.240/28 blackhole distance '254'
+set protocols static route 192.168.50.240/28 blackhole distance '254'
+set protocols static route 192.168.60.240/28 blackhole distance '254'
+
+# VRRP on VLAN 40 only: bgp-01 is master (priority 200), bgp-02 backup (priority 100)
+set high-availability vrrp group VLAN40 interface 'eth0'
+set high-availability vrrp group VLAN40 vrid '40'
+set high-availability vrrp group VLAN40 priority '200'
 set high-availability vrrp group VLAN40 address 192.168.40.12/24
 
-set high-availability vrrp group VLAN50 interface eth0.50
-set high-availability vrrp group VLAN50 vrid 50
-set high-availability vrrp group VLAN50 priority 200
-set high-availability vrrp group VLAN50 address 192.168.50.1/24
-
-set high-availability vrrp group VLAN60 interface eth0.60
-set high-availability vrrp group VLAN60 vrid 60
-set high-availability vrrp group VLAN60 priority 200
-set high-availability vrrp group VLAN60 address 192.168.60.1/24
-
-# Default route to the confirmed UniFi VLAN 40 gateway
-set protocols static route 0.0.0.0/0 next-hop 192.168.40.1
-
-# BGP — own ASN 65000, iBGP peer to the other VyOS router
-set protocols bgp system-as 65000
-set protocols bgp neighbor 192.168.40.11 remote-as 65000
+# BGP: ASN 65000, iBGP to the other VyOS router
+set protocols bgp system-as '65000'
+set protocols bgp parameters router-id '192.168.40.10'
+set protocols bgp neighbor 192.168.40.11 remote-as '65000'
 set protocols bgp neighbor 192.168.40.11 description 'iBGP to bgp-02'
+set protocols bgp neighbor 192.168.40.11 address-family ipv4-unicast
 
-# eBGP peers (placeholder — actual Cilium speakers come in Tier 2; pre-stage the config)
-# homelab-prod cluster nodes (will peer from 192.168.50.30-33)
-set protocols bgp neighbor-group homelab-prod remote-as 65001
-set protocols bgp neighbor-group homelab-prod description 'homelab-prod cluster Cilium'
-# homelab-dev cluster nodes (will peer from 192.168.60.30-32)
-set protocols bgp neighbor-group homelab-dev remote-as 65002
-set protocols bgp neighbor-group homelab-dev description 'homelab-dev cluster Cilium'
-
-# SSH access
-set service ssh port '22'
-set service ssh listen-address '192.168.40.10'
+# eBGP peer groups, staged empty for the Tier 2 Cilium speakers (VyOS calls these peer-group)
+set protocols bgp peer-group homelab-prod remote-as '65001'
+set protocols bgp peer-group homelab-prod address-family ipv4-unicast
+set protocols bgp peer-group homelab-dev remote-as '65002'
+set protocols bgp peer-group homelab-dev address-family ipv4-unicast
 
 commit
 save
 exit
 ```
 
-For **bgp-02**, identical config but:
-- `set system host-name bgp-02`
-- All VRRP priorities `100` instead of `200`
-- All interface IPs ending in `.11`, `.3`, `.3` respectively
-- iBGP peer to `192.168.40.10`
+SSH (`service ssh listen-address`) stays as set during the bootstrap. For **bgp-02**: host name `bgp-02`, address and router ID `192.168.40.11`, VRRP priority `100`, iBGP neighbor `192.168.40.10`.
+
+**Changes from the original plan:**
+
+- **No VLAN50/VLAN60 VRRP groups.** UniFi owns `.1` on those VLANs, so groups claiming those addresses would conflict with the gateway.
+- **No VLAN 50/60 sub-interfaces (`.2`/`.3`) yet.** With a leg on those VLANs, VyOS would route between them and bypass UniFi's inter-VLAN firewall. How the Tier 2 speakers peer (sub-interfaces with VyOS firewall rules, multihop over VLAN 40, or UniFi as a BGP peer) is decided in [HOMELAB-42](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-42).
+- **`peer-group`, not `neighbor-group`.** `neighbor-group` is not VyOS syntax, so VyOS rejects the `set` command. Neighbors and peer groups also need `address-family ipv4-unicast` to exchange IPv4 routes.
+- **Resolver and blackholes added**, for the reasons in the comments above.
 
 #### 0.3c — Verify BGP fabric
 
-- [ ] SSH to bgp-01: `show ip bgp summary` — confirms iBGP session to bgp-02 is `Established`
-- [ ] SSH to bgp-02: same
-- [ ] `show vrrp` on both — confirms bgp-01 is master, bgp-02 is backup for all three VRRP groups
-- [ ] From your workstation, `ping 192.168.40.12` succeeds (you're hitting the VRRP virtual IP)
-- [ ] Test failover: power off bgp-01 in Proxmox → bgp-02 becomes VRRP master within ~3 seconds → `ping 192.168.40.12` continues working. Power bgp-01 back on, master role returns to it.
-- [ ] Keep all Proxmox host gateways at `192.168.40.1` (UniFi); do not move them to the VyOS VIP.
+`vyos-router-verify.yaml` checks hostname, VRRP group and priority, the default route via UniFi, the blackholes and name resolution, plus the MASTER/BACKUP roles, which router holds the VIP, and iBGP in both directions. Results on 2026-10-28:
+
+- [x] SSH to bgp-01: `show ip bgp summary` — confirms iBGP session to bgp-02 is `Established`
+- [x] SSH to bgp-02: same
+- [x] `show vrrp` on both — confirms bgp-01 is master and bgp-02 is backup for the VLAN40 group
+- [x] `ping 192.168.40.12` succeeds from a VLAN 40 host (pve-01), whose ARP entry resolves the VIP to bgp-01's NIC. The workstation reaches the routers over Tailscale, which deliberately does not route the VIP.
+- [x] Test failover: power off bgp-01 in Proxmox → bgp-02 becomes VRRP master → `ping 192.168.40.12` resumes. **Measured 3.53 s** with a 0.2 s ping from pve-02: within the 5 s gate. The default 1 s advertisement interval gives about 3 × 1 s plus skew ≈ 3.6 s; shorten `advertise-interval` if faster failover is needed. Power bgp-01 back on: it preempts back to master with no lost pings, and iBGP re-establishes within about 30 s.
+- [x] Keep all Proxmox host gateways at `192.168.40.1` (UniFi); do not move them to the VyOS VIP.
+
+After a silent peer loss, iBGP stays listed as up until its hold timer expires (180 s by default). That is expected: BGP plays no part in VIP failover.
 
 > **Blog note — VRRP vs ECMP:** A more sophisticated production setup uses ECMP with both routers active simultaneously rather than VRRP active/passive. For homelab scale, VRRP is dramatically simpler to reason about and the failover latency is acceptable. Document this tradeoff in an ADR — it's exactly the kind of "I considered X but chose Y because" reasoning interviewers probe.
 
@@ -1016,14 +1023,16 @@ You may not advance to Tier 1 until **every** item below passes.
 
 - [ ] All seven Proxmox hosts operational, accessible from workstation, joined to `homelab-pve` with healthy quorum and no HA-managed guests *(v5.4: pve-07 included — plus a healthy ZFS mirror and the GPU bound to `vfio-pci`)*
 - [ ] Both switches use the Phase 0.2 native/tagged port matrix; the Flex-to-upstream link carries 10/40/50/60 (and 70 when used), with matching native VLAN settings. Test guest traffic from pve-07 through its Flex host port and the inter-switch uplink.
-- [ ] `ping 192.168.40.12` from workstation succeeds (VRRP virtual IP responds)
+- [x] `ping 192.168.40.12` succeeds (VRRP virtual IP responds). *Verified 2026-10-28 from VLAN 40 hosts; Tailscale does not route the VIP to a remote workstation.*
 
 #### BGP fabric
 
-- [ ] bgp-01 and bgp-02 both running on separate hypervisors
-- [ ] iBGP session between them is `Established`
-- [ ] VRRP failover test passes (kill master → backup takes over within 5 seconds → restore master → role returns)
-- [ ] Edge router has static routes for all three LB pools pointing to `192.168.40.12`
+*Verified 2026-10-28 ([HOMELAB-19](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-19)); rerun `vyos-router-verify.yaml` before passing the gate.*
+
+- [x] bgp-01 and bgp-02 both running on separate hypervisors
+- [x] iBGP session between them is `Established`
+- [x] VRRP failover test passes (kill master → backup takes over within 5 seconds → restore master → role returns). *Measured 3.53 s.*
+- [x] Edge router has static routes for all three LB pools pointing to `192.168.40.12`
 
 #### Vault HA
 

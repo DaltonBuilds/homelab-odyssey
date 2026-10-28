@@ -51,7 +51,7 @@
 | bgp-01 (VyOS)           | 192.168.40.10   | 40   | BGP router, VRRP master                 | VM on pve-01    |
 | bgp-02 (VyOS)           | 192.168.40.11   | 40   | BGP router, VRRP backup                 | VM on pve-02    |
 | UniFi gateway | 192.168.40.1 | 40 | Confirmed Proxmox/platform gateway; DNS if enabled | UniFi |
-| bgp-vrrp (virtual) | 192.168.40.12 | 40 | Planned VRRP next hop for LB routes; verify unused | Floats bgp-01↔bgp-02 |
+| bgp-vrrp (virtual) | 192.168.40.12 | 40 | VRRP next hop for LB routes (live 2026-10-28) | Floats bgp-01↔bgp-02 |
 | vault-01 (Vault)       | 192.168.40.20   | 40   | Vault HA node 1 (Raft leader candidate) | VM on pve-01    |
 | vault-02 (Vault)       | 192.168.40.21   | 40   | Vault HA node 2                         | VM on **pve-03** *(v5.4: was pve-01)* |
 | vault-03 (Vault)       | 192.168.40.22   | 40   | Vault HA node 3                         | VM on pve-02    |
@@ -101,7 +101,7 @@
 | homelab-dev-lb-pool           | 192.168.60.240 – 192.168.60.250  | Cilium (homelab-dev)      | homelab-dev services         |
 | mgmt-lb-pool            | 192.168.40.240 – 192.168.40.250  | Cilium (homelab-mgmt) | homelab-mgmt services    |
 
-> **Edge router static routes:** Because most consumer/prosumer edge routers don't speak BGP, the edge gets `/28` static routes pointing each LB pool to `192.168.40.12` (the VRRP virtual IP). VyOS handles the rest. This keeps the BGP topology entirely internal. Apply routes only after the VIP is live. A client on the *same* `/24` as an LB address may ARP for it directly instead of using the edge route; validate same-VLAN reachability when Cilium LB advertisement is configured, and use an explicit on-link advertisement or an off-link pool if needed.
+> **Edge router static routes:** Because most consumer/prosumer edge routers don't speak BGP, the edge gets `/28` static routes pointing each LB pool to `192.168.40.12` (the VRRP virtual IP). VyOS handles the rest. This keeps the BGP topology entirely internal. Apply routes only after the VIP is live. Routes applied 2026-10-28; until BGP learns the pools, VyOS drops their traffic at distance-254 blackhole routes instead of looping it back to UniFi. A client on the *same* `/24` as an LB address ARPs for it directly instead of using the edge route (observed: pve-01 resolves `192.168.40.241` on-link), so BGP-only advertisement leaves same-VLAN clients unable to reach it. LB traffic also enters through VyOS but returns via each node's UniFi gateway. Decide an off-link pool, an on-link (L2) advertisement or a documented limitation, the speaker peering path, and the return path before Cilium peers: [HOMELAB-42](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-42).
 
 ---
 

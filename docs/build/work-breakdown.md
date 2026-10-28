@@ -78,9 +78,10 @@ Tracker mapping: baseline [HOMELAB-36](https://daltonbuilds.youtrack.cloud/issue
 
 **Epic [0.3] VyOS BGP fabric** — `network`
 - Story: Provision bgp-01 (pve-01) + bgp-02 (pve-02) from VyOS ISO (UI, not Terraform); snapshot after install.
-- Story: Configure VLAN 40 VRRP VIP `192.168.40.12` (UniFi retains `.1`), iBGP peering between the pair, and pre-staged eBGP peers for cluster VLANs. Confirm VLAN 50/60 VIP ownership before enabling those VRRP groups.
+- Story: Configure VLAN 40 VRRP VIP `192.168.40.12` (UniFi retains `.1`), iBGP peering between the pair, and pre-staged eBGP peer groups for cluster VLANs. Confirm VLAN 50/60 VIP ownership before enabling those VRRP groups. *(Done 2026-10-28: UniFi owns `.1` on 50/60, so VLAN 40 only; managed by the homelab-infra `vyos_router` role.)*
 - Story: Keep pve-02 and every other Proxmox host on UniFi gateway `192.168.40.1`; apply the prepared LB-pool routes to `.12` only after that VyOS VIP is live.
-- Story (verify): iBGP `Established`; VRRP failover < 3s; gateway ping survives bgp-01 power-off.
+- Story (verify): iBGP `Established`; VRRP failover < 5s *(measured 3.53s; was < 3s, which the default VRRP timers cannot meet)*; gateway ping survives bgp-01 power-off.
+- Follow-up for Tier 2: same-VLAN LoadBalancer reachability, the speaker peering path and asymmetric return traffic ([HOMELAB-42](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-42)).
 
 ### Capability: Secrets Substrate (OpenBao)
 

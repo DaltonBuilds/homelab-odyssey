@@ -20,7 +20,7 @@ A full-document consistency sweep was run in August 2026. Most findings were fix
 5. **Flux `Receiver` + Harbor push webhook** appear only as Tier 4 gate checkboxes with no phase that builds them. Either add them to Phase 4.2 / 2.9 or strike the gate items (both are annotated inline).
 6. **Kyverno seed policies conflict with the doc's own manifests.** `require-resource-requests` is violated by several inline manifests (Renovate CronJob, ntfy, the rclone DR CronJob), and `require-image-signature` will reject every third-party image proxied through Harbor — which, after the Phase 2.10 air-gap pivot, is *all* of them, not a handful. Before the Phase 4.15 audit→enforce flip: scope `imageReferences` to first-party repos (`harbor.homelab-prod.homelab.internal/apps/*`), and add resource requests to the inline manifests.
 7. **VLAN 70 (ephemeral) needs switch config.** Now in the VLAN plan, but the Phase 0.2 trunk checklist still only covers 10/40/50/60, and the ephemeral OpenTofu is the only consumer.
-8. **ASN 65004 for ephemeral clusters** is newly allocated in the ASN table; VyOS has no matching `neighbor-group`. Add one in Phase 0.3b (or at drill time) if ephemeral clusters need LB IPs.
+8. **ASN 65004 for ephemeral clusters** is newly allocated in the ASN table; VyOS has no matching `peer-group` (VyOS syntax; the doc previously said `neighbor-group`). Add one through the homelab-infra `vyos_router` inventory at drill time if ephemeral clusters need LB IPs.
 9. **Garage credential paths.** `secret/garage/*` predates the per-cluster ESO policy scoping. The `secret/platform/*` prefix added in Phase 2.2c is the intended home for shared credentials — migrate the Garage entries (Phase 1.7b) and add the concrete `ExternalSecret` manifests for `garage-harbor-creds` and `garage-cnpg-creds`, which are referenced but never defined.
 10. **Cross-namespace TLS secrets.** Several apps reference the Gateway's wildcard TLS Secret from their own namespace, which Kubernetes doesn't allow. Guidance is inline at Phase 2.6b; the Harbor and Grafana manifests still need editing. *(v5.3: the Keycloak case is resolved — the Operator-based Phase 3.13b terminates TLS at the Gateway and no longer references the wildcard Secret.)*
 11. **Static API-endpoint DNS records are used before they're created.** Phases 1.8/1.10 use `*-api.homelab.internal` names that Phase 2.1a creates. Move those static host-mappings into Tier 1 (or add them to Phase 0.3b alongside the rest of the VyOS base config).
@@ -56,6 +56,16 @@ The idle home-office workstation tower was reassigned to the fleet as `pve-07`, 
 19. **Tower capacity corrected and allocation retained (2026-09-13).** The mirror is ~1.8TiB usable, not the previously estimated ~900GB. Retain 60GiB management, 200GiB build, and 250GiB GPU disks plus a ~50GiB host allowance; leave remaining capacity uncommitted. Revisit allocations after observed use and evaluate Garage replication later (ADR-011).
 15. **oauth2-proxy route scoping is unspecified per app.** Phase 3.14e lists the hazards (don't gate machine-callable API/webhook endpoints: Harbor's registry API, Forgejo's git-over-HTTPS) but the per-app protected-path lists are authoring work for whenever Phases 4.7–4.11 get built.
 16. **No workload identity anywhere in the build.** Every machine-to-machine credential is an AppRole `secret_id`, a ServiceAccount token, or a long-lived cloud key. Tracked as the top-priority spike in [Future Upgrades](future-upgrades.md#spiffe--spire--workload-identity-highest-dual-mission-value-on-this-list); gated on the Tier 3 gate. Called out here because it is a genuine design gap, not just a nice-to-have.
+
+---
+
+## Addendum — Phase 0.3 build (October 2026)
+
+The VyOS pair went live on 2026-10-28 ([HOMELAB-17](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-17)–[19](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-19)); Phase 0.3 in [Tier 0](tier-0-foundation.md) now records the as-built configuration.
+
+**New open items:**
+
+20. **LoadBalancer reachability and VyOS peering path** *(Phase 0.3 build, 2026-10-28)*. The `*.240/28` pools sit inside connected `/24`s, so same-VLAN clients cannot reach BGP-only LB IPs. VyOS is on VLAN 40 only, so Phase 2.1c's VLAN 50/60 peers need sub-interfaces, multihop or a different peer, and LB return traffic is asymmetric through UniFi. Decide before Cilium peers: [HOMELAB-42](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-42).
 
 ---
 
