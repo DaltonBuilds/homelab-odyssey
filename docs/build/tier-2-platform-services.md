@@ -166,7 +166,9 @@ Apply identical manifests on homelab-dev (ASN 65002, pool `192.168.60.240–250`
 
 #### 2.1c — Activate the second BGP peer on VyOS
 
-In Tier 0 we pre-staged neighbor-groups but didn't bind specific peers. Now bind the cluster nodes as peers. On bgp-01:
+In Tier 0 we pre-staged peer groups but didn't bind specific peers. Now bind the cluster nodes as peers. On bgp-01:
+
+> **Resolve [HOMELAB-42](https://daltonbuilds.youtrack.cloud/issue/HOMELAB-42) first.** As built in Tier 0, VyOS sits on VLAN 40 only, so the VLAN 50/60 peers below are not directly connected. Choose VyOS sub-interfaces (with VyOS firewall rules), eBGP multihop over VLAN 40, or UniFi as the peer. Also decide how same-VLAN clients reach LB IPs and confirm the asymmetric return path through UniFi works. Add the neighbors through the homelab-infra `vyos_router` inventory rather than by hand.
 
 ```bash
 configure
@@ -183,7 +185,8 @@ set protocols bgp neighbor 192.168.60.31 peer-group homelab-dev
 set protocols bgp neighbor 192.168.60.32 peer-group homelab-dev
 
 # Mgmt-plane peers from VLAN 40
-set protocols bgp neighbor-group mgmt remote-as 65003
+set protocols bgp peer-group mgmt remote-as 65003
+set protocols bgp peer-group mgmt address-family ipv4-unicast
 set protocols bgp neighbor 192.168.40.60 peer-group mgmt
 set protocols bgp neighbor 192.168.40.61 peer-group mgmt
 set protocols bgp neighbor 192.168.40.62 peer-group mgmt
