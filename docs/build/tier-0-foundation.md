@@ -34,14 +34,17 @@
 
 **Goal:** Every physical machine running Proxmox VE, accessible from workstation, ready to host VMs. *(v5.2: this now includes the M920q trio and M920x #2, which formerly ran bare-metal Ubuntu — see ADR-008. v5.4: and pve-07, the former workstation tower — see ADR-011.)*
 
-**Ubuntu media baseline (2026-09):** use the Ubuntu Server **26.04.1 live-server amd64 ISO** for manual Vault VM installs, and the separate Ubuntu Server **26.04 amd64 cloud image** (`ubuntu-26.04-server-cloudimg-amd64.img`) for later cloud-init VMs. The 26.04.1 point release is the install ISO version; Ubuntu publishes the cloud image under the 26.04 filename. The live-server ISO was previously staged on pve-01; re-upload it after the failed-drive rebuild. Because `local` storage is node-local, stage media on each host that will use it:
+**Ubuntu media baseline (2026-09):** use the Ubuntu Server **26.04.1 live-server amd64 ISO** for manual installs, and the separate Ubuntu Server **26.04 amd64 cloud image** (`ubuntu-26.04-server-cloudimg-amd64.img`) for cloud-init VMs, including the Vault VMs *(2026-10-28 — HOMELAB-21)*. The 26.04.1 point release is the install ISO version; Ubuntu publishes the cloud image under the 26.04 filename. The live-server ISO was previously staged on pve-01; re-upload it after the failed-drive rebuild. Because `local` storage is node-local, stage media on each host that will use it:
 
 | Media | Hosts | Planned use |
 | --- | --- | --- |
-| Ubuntu Server 26.04.1 live-server ISO | pve-01, pve-02, pve-03 | Manual installs of vault-01, vault-02, vault-03 |
+| Ubuntu Server 26.04.1 live-server ISO | — | Not used for the Vault VMs *(2026-10-28 — HOMELAB-21)* |
+| Ubuntu Server 26.04 cloud image, pinned serial | pve-01, pve-02, pve-03 (staged by Ansible under `/var/lib/vz/import/`) | vault-01, vault-02, vault-03 |
 | VyOS LTS ISO | pve-01, pve-02 | bgp-01, bgp-02 |
 | Talos `metal-amd64.iso` | pve-01, pve-02, pve-07 | mgmt-01, mgmt-03, mgmt-02 |
 | Ubuntu Server 26.04 amd64 cloud image | pve-01 through pve-07, before those VMs are provisioned | Later Ubuntu cloud-init VMs |
+
+> **Ubuntu 26.04 + Proxmox cloud-init network gotcha *(2026-10-28 — HOMELAB-21)*:** Proxmox's generated network config renames the NIC to `eth0`. On 26.04's first boot the dracut initrd has already brought the NIC up as `ens18`, so the rename fails (`[busy]`), netplan's static config never matches, and the VM boots on DHCP. Supply the network config as a `cicustom` snippet that matches the NIC by MAC **without** `set-name`. `local` storage has `snippets` enabled for this. Every later Ubuntu cloud-init VM, including the Tier 1 OpenTofu ones, needs the same treatment.
 
 Record the downloaded image builds and checksums. The [Ubuntu Server ISO](https://ubuntu.com/download/server) and [Ubuntu cloud image](https://cloud-images.ubuntu.com/releases/resolute/release/) are different artifacts.
 
@@ -301,7 +304,7 @@ After a silent peer loss, iBGP stays listed as up until its hold timer expires (
 
 **Goal:** Three Vault VMs (vault-01/02/03) running Ubuntu Server 26.04.1, hardened baseline, OpenBao binary installed (pinned 2.6.x), ready to initialize.
 
-> **Bootstrap pragmatism:** We're going to hand-provision these three VMs in the Proxmox UI rather than via Terraform. Reason: Terraform will be Vault-authenticated starting in Tier 1, and the Vault that authenticates it has to exist first. After Tier 0 completes, all future infrastructure provisioning (including replacing or scaling these Vault VMs) goes through Terraform-with-Vault. This is the *only* manual provisioning in the entire build.
+> **Bootstrap pragmatism:** These three VMs are provisioned by Ansible (`homelab-infra` `vault-vm.yaml`), not Terraform. Reason: Terraform will be Vault-authenticated starting in Tier 1, and the Vault that authenticates it has to exist first. Plain Ansible over SSH has no such dependency. After Tier 0 completes, OpenTofu imports these VMs (never recreates them) and all future provisioning, including replacing or scaling them, goes through Terraform-with-Vault. *(2026-10-28 — HOMELAB-21)* *(Originally hand-provisioned in the Proxmox UI.)*
 
 > **OpenBao naming convention (read once — applies to the whole doc):** The secrets server is **OpenBao** (Linux Foundation fork of HashiCorp Vault, API-compatible — ADR-006). Everything else keeps the familiar Vault naming on purpose: hostnames stay `vault-01/02/03`, DNS stays `vault.homelab.internal`, `pass` paths stay `homelab/vault/*`, and prose references to "Vault" / "the Vault tier" mean this OpenBao cluster. Only three things differ day-to-day: the CLI is **`bao`**, the systemd unit is **`openbao`**, and config lives in **`/etc/openbao/`**. Env vars stay `VAULT_*` throughout — the `bao` CLI falls back to them when `BAO_*` is unset, and every downstream client (Terraform provider, Ansible `hashi_vault`, ESO, cert-manager, cosign) expects them anyway.
 
@@ -315,12 +318,15 @@ For each (specs are identical):
 | vault-02   | pve-02  | 2    | 2GB | 20GB | 192.168.40.21  |
 | vault-03   | **pve-03** *(2026-10-28: renumbered; vault-02 was here)* | 2    | 2GB | 20GB | 192.168.40.22  |
 
-> **One Raft node per hypervisor *(v5.4 — ADR-011)*.** One node moved off pve-01 to pve-03 so no single hypervisor hosts two of the three OpenBao nodes; on 2026-10-28 the names were renumbered so `vault-0N` lives on `pve-0N`. Do not "simplify" this back onto pve-01 while hand-creating the VMs — the whole point of the Tier 1 single-host-loss drill is that this spread holds. `mgmt-02` moves to pve-07 in the same change.
+> **One Raft node per hypervisor *(v5.4 — ADR-011)*.** One node moved off pve-01 to pve-03 so no single hypervisor hosts two of the three OpenBao nodes; on 2026-10-28 the names were renumbered so `vault-0N` lives on `pve-0N`. Do not "simplify" this back onto pve-01 when creating the VMs — the whole point of the Tier 1 single-host-loss drill is that this spread holds. `mgmt-02` moves to pve-07 in the same change.
 
-- [ ] Create each VM in Proxmox UI from the Ubuntu Server 26.04.1 live-server amd64 ISO
-- [ ] Configure cloud-init with hostname, static IP on VLAN 40, your SSH key, `dalton` user with sudo, password auth disabled
-- [ ] Boot, complete initial Ubuntu install
-- [ ] On first SSH login, apt update + dist-upgrade, install `qemu-guest-agent`, reboot
+*(2026-10-28 — HOMELAB-22: replaces the hand-built ISO install.)* `homelab-infra` `ansible/playbooks/vault-vm.yaml`, one node at a time (vault-03, then vault-02, then vault-01). See that repo's README for details.
+
+- [x] Stage the pinned Ubuntu 26.04 cloud image (serial `20261016`) on each host and verify its SHA256 against Ubuntu's `SHA256SUMS`
+- [x] `qm create` guests 120/121/122 on `local-lvm`, with Proxmox cloud-init: `dalton` user, workstation SSH key, no password, so password SSH auth stays off
+- [x] Attach per-VM `cicustom` snippets: a static network config matched by MAC (see the gotcha above), and vendor data that installs `qemu-guest-agent` on first boot
+- [x] Grow the disk to 20GB, boot, wait for first-boot cloud-init via the guest agent
+- [x] Over SSH: apt dist-upgrade, reboot, confirm the agent, check the trusted SSH host key against the key read through the agent, require key-only SSH
 
 #### 0.4b — Baseline OS hardening
 
@@ -370,11 +376,12 @@ On each Vault VM:
 # latest 2.6.x patch release before starting, and use that.
 BAO_VERSION="2.6.0"
 
-wget "https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}/bao_${BAO_VERSION}_linux_amd64.deb"
+# The asset is openbao_<version>_linux_amd64.deb, not bao_… (2026-10-28).
+wget "https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}/openbao_${BAO_VERSION}_linux_amd64.deb"
 wget "https://github.com/openbao/openbao/releases/download/v${BAO_VERSION}/checksums.txt"
-grep "bao_${BAO_VERSION}_linux_amd64.deb" checksums.txt | sha256sum -c -
+grep " openbao_${BAO_VERSION}_linux_amd64.deb$" checksums.txt | sha256sum -c -
 
-sudo dpkg -i "bao_${BAO_VERSION}_linux_amd64.deb"
+sudo dpkg -i "openbao_${BAO_VERSION}_linux_amd64.deb"
 
 # The package installs the `bao` binary, an `openbao` system user/group, config
 # at /etc/openbao/openbao.hcl, and an `openbao.service` systemd unit.
