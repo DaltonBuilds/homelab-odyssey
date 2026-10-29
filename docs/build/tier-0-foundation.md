@@ -375,7 +375,7 @@ sudo ufw enable
 
 *(2026-10-28 — HOMELAB-26/27)* Implemented by the same playbook: **OpenBao 2.6.5**, pinned by version and SHA256 in `group_vars/vault.yaml`, held with `dpkg --set-selections`. The release's `checksums.txt` was verified with its Sigstore bundle (`cosign verify-blob`) against OpenBao's GitHub release workflow. The commands below are the manual equivalent.
 
-> **What the package does:** `postinst` creates the `openbao` user, a self-signed TLS key/cert in `/opt/openbao/tls` and an empty `/opt/openbao/data`, and does **not** enable or start the service. The unit's `CapabilityBoundingSet=CAP_SYSLOG` leaves out `CAP_IPC_LOCK`, so OpenBao cannot `mlock`. See the note in 0.5a.
+> **What the package does:** `postinst` creates the `openbao` user, a self-signed TLS key/cert in `/opt/openbao/tls` and an empty `/opt/openbao/data`, and does **not** enable or start the service. The unit's `CapabilityBoundingSet=CAP_SYSLOG` leaves out `CAP_IPC_LOCK` because OpenBao 2.0 removed mlock support. See the note in 0.5a.
 
 On each Vault VM:
 
@@ -425,7 +425,7 @@ The earlier sample mixed schemes. It disabled listener TLS but advertised `https
 - **`cluster_addr` stays `https://`.** OpenBao ignores its scheme: Raft and request forwarding on 8201 always use TLS with cluster-generated certificates, whatever the listener's TLS setting.
 - **No secrets cross the network over HTTP.** Init, unseal and root-token login run on the node against `http://127.0.0.1:8200`, reached over SSH. Init output goes over that SSH session straight into `pass` (0.5b).
 - **Narrow the API firewall for bootstrap.** Phase 0.4 opened 8200 to VLANs 10, 40, 50 and 60 (`vault_baseline_api_sources`). Until 0.7d, a plaintext API should reach only VLAN 40 and the workstation's VLAN 10. 0.7d re-adds 50 and 60.
-- **`disable_mlock = true`.** The packaged unit's `CapabilityBoundingSet=CAP_SYSLOG` has no `CAP_IPC_LOCK`, so mlock can't work without a drop-in. mlock is also discouraged with integrated storage. HashiCorp recommends `true` plus no swap, and OpenBao's mlock-removal RFC notes the same. Swap is off (0.4b) and the unit sets `MemorySwapMax=0`.
+- **No `disable_mlock` line.** OpenBao 2.0.0 removed mlock support ([GH-363](https://openbao.org/docs/release-notes/2-0-0)), and 2.6.5's `bao operator diagnose` reports `disable_mlock` as an unknown field. That is also why the packaged unit has no `CAP_IPC_LOCK`. Swap off (0.4b) and the unit's `MemorySwapMax=0` keep secrets from paging to disk. Don't grant `CAP_IPC_LOCK` in a drop-in: OpenBao's known-issues page warns it can break integrated storage. *(Corrected 2026-10-29; the first draft set `disable_mlock = true`.)*
 
 Ansible (`vault_baseline` in homelab-infra) templates this file, keeps the data directory and firewall in shape, and starts the service. Init, unseal and `bao audit enable` stay manual; Ansible never handles shares or tokens.
 
@@ -439,7 +439,6 @@ Ansible (`vault_baseline` in homelab-infra) templates this file, keeps the data 
 ui            = true
 cluster_addr  = "https://192.168.40.20:8201"   # scheme ignored; cluster traffic is always TLS
 api_addr      = "http://192.168.40.20:8200"    # https:// from Phase 0.7d
-disable_mlock = true                           # see "Bootstrap transport" above
 
 listener "tcp" {
   address         = "0.0.0.0:8200"
@@ -785,7 +784,7 @@ bao write pki_int/roles/internal-services \
 
 Vault has been running with `tls_disable = 1` since Phase 0.5. Now that PKI exists, generate a cert for Vault and switch to TLS.
 
-> **Undo the Phase 0.5 bootstrap settings *(2026-10-29 — HOMELAB-31)*:** in the Ansible `openbao.hcl` template, set `api_addr` and every `retry_join` to `https://` (below) and remove `tls_disable`. Re-add VLANs 50 and 60 to `vault_baseline_api_sources`. The package's unused self-signed pair in `/opt/openbao/tls` can then be deleted. `cluster_addr` needs no change; its scheme was always ignored. `disable_mlock = true` stays. Make these changes in Ansible, not by hand on the nodes.
+> **Undo the Phase 0.5 bootstrap settings *(2026-10-29 — HOMELAB-31)*:** in the Ansible `openbao.hcl` template, set `api_addr` and every `retry_join` to `https://` (below) and remove `tls_disable`. Re-add VLANs 50 and 60 to `vault_baseline_api_sources`. The package's unused self-signed pair in `/opt/openbao/tls` can then be deleted. `cluster_addr` needs no change; its scheme was always ignored. Make these changes in Ansible, not by hand on the nodes.
 
 ```bash
 # Issue a cert for the Vault cluster (covers all three nodes via SANs)
