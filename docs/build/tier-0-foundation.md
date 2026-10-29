@@ -544,7 +544,7 @@ bao audit enable file file_path=/opt/openbao/audit/audit.log
 
 > **Failure semantics — know this before it bites:** with a single audit device, if OpenBao cannot write to it (disk full, permissions), it **blocks all requests** rather than proceed unaudited. That is the compliance-correct behavior — and the reason the Vault-VM disk alerts in Phase 3.5e are not optional. Keep audit-disk headroom alerting tight.
 
-Logrotate on each node (audit logs grow fast; a HUP makes OpenBao reopen the file):
+Logrotate on each node (audit logs grow fast; a HUP makes OpenBao reopen the file). Ansible's `vault_baseline` installs this file, and it creates the audit directory above (HOMELAB-34). The packaged unit's `ExecReload` sends SIGHUP to the main process only, so the rule uses `systemctl reload` rather than `systemctl kill`, which signals the whole cgroup *(2026-10-29)*:
 
 ```bash
 sudo tee /etc/logrotate.d/openbao-audit << 'LOGEOF'
@@ -555,8 +555,9 @@ sudo tee /etc/logrotate.d/openbao-audit << 'LOGEOF'
   delaycompress
   missingok
   notifempty
+  create 0600 openbao openbao
   postrotate
-    systemctl kill -s HUP openbao
+    if systemctl is-active --quiet openbao; then systemctl reload openbao; fi
   endscript
 }
 LOGEOF
@@ -784,7 +785,7 @@ bao write pki_int/roles/internal-services \
 
 Vault has been running with `tls_disable = 1` since Phase 0.5. Now that PKI exists, generate a cert for Vault and switch to TLS.
 
-> **Undo the Phase 0.5 bootstrap settings *(2026-10-29 — HOMELAB-31)*:** in the Ansible `openbao.hcl` template, set `api_addr` and every `retry_join` to `https://` (below) and remove `tls_disable`. Re-add VLANs 50 and 60 to `vault_baseline_api_sources`. The package's unused self-signed pair in `/opt/openbao/tls` can then be deleted. `cluster_addr` needs no change; its scheme was always ignored. Make these changes in Ansible, not by hand on the nodes.
+> **Undo the Phase 0.5 bootstrap settings *(2026-10-29 — HOMELAB-31)*:** in the Ansible `openbao.hcl` template, set `api_addr` and every `retry_join` to `https://` (below) and remove `tls_disable`. Re-add VLANs 50 and 60 to `vault_baseline_api_sources`. The package's unused self-signed pair in `/opt/openbao/tls` (`CN=OpenBao`, no SANs) can then be deleted. `cluster_addr` needs no change; its scheme was always ignored. Make these changes in Ansible, not by hand on the nodes.
 
 ```bash
 # Issue a cert for the Vault cluster (covers all three nodes via SANs)
