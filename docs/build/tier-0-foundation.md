@@ -416,24 +416,36 @@ sudo systemctl disable openbao
 
 > **Why Shamir first, then migrate to auto-unseal:** Practicing the migration is the whole point. Going straight to auto-unseal hides the failure modes and the recovery procedure. The migration from Shamir → auto-unseal is the same operation you'd run to *change* KMS providers in the future (e.g., GCP KMS → AWS KMS for a disaster scenario, or rotating the KMS key). It's a high-value rehearsal.
 
+#### Bootstrap transport *(2026-10-29 — HOMELAB-31)*
+
+The earlier sample mixed schemes. It disabled listener TLS but advertised `https://` API addresses, and joined over `http://`. The bootstrap settings are now:
+
+- **Listener: plain HTTP (`tls_disable = 1`) until Phase 0.7d.** The cluster's real certificate comes from its own PKI, which doesn't exist yet. The package's self-signed pair in `/opt/openbao/tls` isn't used. Adopting it would mean reissuing it with IP SANs and distributing a CA that 0.7d replaces a few days later anyway.
+- **`api_addr` and every `retry_join` use `http://`**, so they match the listener.
+- **`cluster_addr` stays `https://`.** OpenBao ignores its scheme: Raft and request forwarding on 8201 always use TLS with cluster-generated certificates, whatever the listener's TLS setting.
+- **No secrets cross the network over HTTP.** Init, unseal and root-token login run on the node against `http://127.0.0.1:8200`, reached over SSH. Init output goes over that SSH session straight into `pass` (0.5b).
+- **Narrow the API firewall for bootstrap.** Phase 0.4 opened 8200 to VLANs 10, 40, 50 and 60 (`vault_baseline_api_sources`). Until 0.7d, a plaintext API should reach only VLAN 40 and the workstation's VLAN 10. 0.7d re-adds 50 and 60.
+- **`disable_mlock = true`.** The packaged unit's `CapabilityBoundingSet=CAP_SYSLOG` has no `CAP_IPC_LOCK`, so mlock can't work without a drop-in. mlock is also discouraged with integrated storage. HashiCorp recommends `true` plus no swap, and OpenBao's mlock-removal RFC notes the same. Swap is off (0.4b) and the unit sets `MemorySwapMax=0`.
+
+Ansible (`vault_baseline` in homelab-infra) templates this file, keeps the data directory and firewall in shape, and starts the service. Init, unseal and `bao audit enable` stay manual; Ansible never handles shares or tokens.
+
 #### 0.5a — Vault configuration file (each node)
 
-Create `/etc/openbao/openbao.hcl` on each Vault VM. Substitute `NODE_HOSTNAME` and `NODE_IP` per node:
+`/etc/openbao/openbao.hcl` on each Vault VM, templated by Ansible. It replaces the package's default file. Per node, only `api_addr`, `cluster_addr` and `node_id` change:
 
 ```hcl
 # /etc/openbao/openbao.hcl  (vault-01 example)
 
 ui            = true
-cluster_addr  = "https://192.168.40.20:8201"
-api_addr      = "https://192.168.40.20:8200"
-disable_mlock = false   # see the mlock note below before using this
+cluster_addr  = "https://192.168.40.20:8201"   # scheme ignored; cluster traffic is always TLS
+api_addr      = "http://192.168.40.20:8200"    # https:// from Phase 0.7d
+disable_mlock = true                           # see "Bootstrap transport" above
 
 listener "tcp" {
-  address       = "0.0.0.0:8200"
+  address         = "0.0.0.0:8200"
   cluster_address = "0.0.0.0:8201"
-  # TLS will be added after PKI is bootstrapped (Phase 0.7).
-  # For initial cluster bring-up we run TLS-disabled inside the trusted VLAN 40,
-  # then rotate to TLS using Vault's own PKI as one of the first PKI operations.
+  # Plain HTTP until Phase 0.7d issues the cluster's certificate from its own PKI.
+  # Secret-bearing commands use 127.0.0.1 over SSH only.
   tls_disable = 1
 }
 
@@ -460,60 +472,63 @@ telemetry {
 log_level = "info"
 ```
 
-> **mlock — decide before writing this file *(2026-10-28 — HOMELAB-26/27)*:** the packaged `openbao.service` sets `CapabilityBoundingSet=CAP_SYSLOG`, with no `CAP_IPC_LOCK`, so `disable_mlock = false` is expected to stop the server at startup because it cannot lock memory. Either set `disable_mlock = true`, which HashiCorp recommends for integrated (Raft) storage; swap is already off and the unit sets `MemorySwapMax=0`. Or add a systemd drop-in that grants `CAP_IPC_LOCK`. Record the choice in the Phase 0.5 ticket.
+The `retry_join` blocks are identical on all three nodes. Each node tries every listed address, including its own, and joins whichever one answers as an initialized leader, so the order doesn't matter.
 
-On vault-02 and vault-03, change `cluster_addr`, `api_addr`, and `node_id` to match the host. The `retry_join` block stays identical on all three (each node joins via the other two — order-independent).
-
-- [ ] Create `/opt/openbao/data` on each node, owned by the `openbao` user:
-  ```bash
-  sudo install -d -o openbao -g openbao -m 0750 /opt/openbao/data
-  ```
-- [ ] Enable and start Vault on **vault-01 first**, then vault-02, then vault-03:
-  ```bash
-  sudo systemctl enable --now openbao
-  sudo systemctl status openbao   # should show running
-  ```
+- [ ] `/opt/openbao/data` on each node, owned by `openbao`, mode 0750. The package creates it; Ansible asserts the owner and mode.
+- [ ] Narrow `vault_baseline_api_sources` to VLANs 40 and 10 (see "Bootstrap transport").
+- [ ] Roll out with `vault-baseline.yaml`: `--check`, then push the config to the canary vault-03 → vault-02 → vault-01 with the service still disabled. Then set `vault_baseline_openbao_enabled: true` and start all three. Start order doesn't matter: nothing is initialized yet, and init happens on vault-01 only.
+- [ ] Each node: `systemctl is-active openbao` → `active`; `journalctl -u openbao` shows no config or permission errors. Sealed and uninitialized is expected at this point.
 
 #### 0.5b — Initialize the cluster (vault-01 only)
 
+Run init on vault-01 against its localhost listener, over SSH from the workstation. Pipe the output straight into `pass`. It travels inside the SSH session, is GPG-encrypted on arrival, and is never written to disk in plaintext on either machine:
+
 ```bash
-export VAULT_ADDR=http://127.0.0.1:8200
+# From the workstation. Use a plain terminal: no session recording, no AI-assisted shell.
+ssh dalton@192.168.40.20 'VAULT_ADDR=http://127.0.0.1:8200 bao status' ; echo "exit=$?"
+# Expect Initialized=false; bao status exits 2 while sealed. Stop if Initialized=true.
 
-bao operator init \
-  -key-shares=5 \
-  -key-threshold=3 \
-  -format=json > ~/vault-init.json
+ssh dalton@192.168.40.20 \
+  'VAULT_ADDR=http://127.0.0.1:8200 bao operator init -key-shares=5 -key-threshold=3 -format=json' \
+  | pass insert -m homelab/vault-init-shamir
 
-chmod 600 ~/vault-init.json
+# Confirm the entry holds 5 shares without printing anything
+pass show homelab/vault-init-shamir | jq -e '.unseal_keys_b64 | length == 5' >/dev/null && echo ok
 ```
 
-> **CRITICAL — secure `vault-init.json` immediately:** This file contains 5 unseal keys + the initial root token. Until Phase 0.6 migrates to auto-unseal, these unseal keys are the *only* way to bring Vault back up after a restart.
+If init fails, the pipe stores an empty entry. Check the exit status and the `ok` line before continuing.
+
+> **CRITICAL — this entry is the cluster's only key:** it contains 5 unseal keys + the initial root token. Until Phase 0.6 migrates to auto-unseal, these unseal keys are the *only* way to bring Vault back up after a restart.
 >
-> **Storage plan:** (1) Encrypt with your GPG key and store in `pass` under `homelab/vault-init-shamir`. (2) Print a paper copy of unseal keys 1, 2, 3 and store in a physical safe. (3) After Phase 0.6 migration, archive — these Shamir keys are superseded by the auto-unseal recovery keys.
+> **Storage plan:** (1) GPG-encrypted in `pass` under `homelab/vault-init-shamir` (done by the pipe above; confirm with `pass ls homelab`, not `pass show`). (2) Print a paper copy of unseal keys 1, 2, 3 and store it in a physical safe; print from an offline step, not a shared printer queue. (3) After the Phase 0.6 migration, archive: these Shamir keys are superseded by the auto-unseal recovery keys.
 
 #### 0.5c — Unseal all three nodes
 
 ```bash
-# On each Vault VM in turn — vault-01, vault-02, vault-03
+# On each Vault VM in turn (ssh in first): vault-01, then vault-02 and vault-03 once retry_join has joined them
 export VAULT_ADDR=http://127.0.0.1:8200
 
-bao operator unseal <unseal-key-1>
-bao operator unseal <unseal-key-2>
-bao operator unseal <unseal-key-3>
+bao operator unseal   # no argument: it prompts and the share never reaches shell history
+bao operator unseal
+bao operator unseal
 
 bao status
 # Expect: Sealed=false, HA Enabled=true, Raft Applied Index increasing
 ```
 
+> **Shamir means manual unseal after every restart,** including restarts from Ansible runs and PVE host reboots, until Phase 0.6.
+
 #### 0.5d — Verify Raft cluster health
 
 ```bash
-# Log in as root to inspect
-export VAULT_ADDR=http://192.168.40.20:8200
-bao login <initial-root-token>
+# On vault-01, over SSH
+export VAULT_ADDR=http://127.0.0.1:8200
+bao login   # no argument: prompts for the initial root token
 
 bao operator raft list-peers
-# Expect three nodes: vault-01 (leader), vault-02 (follower), vault-03 (follower)
+# Expect three voters: one leader, two followers
+
+rm -f ~/.vault-token   # bao login caches the root token here; don't leave it on the node
 ```
 
 #### 0.5e — Enable the file audit device *(v5.1 — gap fix)*
@@ -768,7 +783,9 @@ bao write pki_int/roles/internal-services \
 
 #### 0.7d — Rotate Vault's own listener to TLS (using its own PKI)
 
-Vault has been running with `tls_disable = 1` since Phase 0.5. Now that PKI exists, generate a cert for Vault and switch to TLS:
+Vault has been running with `tls_disable = 1` since Phase 0.5. Now that PKI exists, generate a cert for Vault and switch to TLS.
+
+> **Undo the Phase 0.5 bootstrap settings *(2026-10-29 — HOMELAB-31)*:** in the Ansible `openbao.hcl` template, set `api_addr` and every `retry_join` to `https://` (below) and remove `tls_disable`. Re-add VLANs 50 and 60 to `vault_baseline_api_sources`. The package's unused self-signed pair in `/opt/openbao/tls` can then be deleted. `cluster_addr` needs no change; its scheme was always ignored. `disable_mlock = true` stays. Make these changes in Ansible, not by hand on the nodes.
 
 ```bash
 # Issue a cert for the Vault cluster (covers all three nodes via SANs)

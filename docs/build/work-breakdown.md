@@ -91,8 +91,9 @@ Tracker mapping: baseline [HOMELAB-36](https://daltonbuilds.youtrack.cloud/issue
 - Story: Install pinned OpenBao 2.6.x `.deb` on all three; service present, not yet enabled.
 
 **Epic [0.5] OpenBao HA cluster initialization** — `openbao`
-- Story: Write `openbao.hcl` (Raft storage, TLS listener) per node; enable service.
-- Story: `bao operator init` on vault-01; store Shamir keys — GPG-encrypted in `pass` + paper copy of 3 keys in the safe.
+- Task: Reconcile bootstrap transport, settled 2026-10-29 (HOMELAB-31): plain-HTTP listener until 0.7d, `cluster_addr` always TLS, secret-bearing commands on localhost over SSH, API firewall narrowed to VLANs 40/10, `disable_mlock = true`.
+- Story: Ansible templates `openbao.hcl` (Raft storage, bootstrap listener) per node; enable service.
+- Story: `bao operator init` on vault-01 over SSH, piped straight into `pass` (GPG-encrypted) + paper copy of 3 keys in the safe.
 - Story: Join vault-02/03 to Raft; enable cluster-wide file audit device on all nodes.
 - Story (verify): `raft list-peers` = 3 voters; all unsealed; audit log rotating.
 
@@ -104,7 +105,7 @@ Tracker mapping: baseline [HOMELAB-36](https://daltonbuilds.youtrack.cloud/issue
 **Epic [0.7] PKI engine — root + intermediate CA** — `openbao`, `security`
 - Story: Mount root PKI (10y), generate self-signed root, set issuing/CRL URLs.
 - Story: Mount intermediate, CSR → sign with root → import; set URLs; define `internal-services` role + allowed domains.
-- Story: Issue the OpenBao cluster's own TLS cert (SAN-covered); distribute; roll each node.
+- Story: Issue the OpenBao cluster's own TLS cert (SAN-covered); distribute; roll each node; undo the 0.5 bootstrap settings (`https://` api_addr/retry_join, re-widen API firewall).
 - Story (verify): test issuance for `test.homelab.internal` returns a valid cert; cluster listener on Vault-signed TLS.
 
 **Epic [0.8] Transit engine (encryption as a service)** — `openbao`
