@@ -330,7 +330,13 @@ For each (specs are identical):
 
 #### 0.4b — Baseline OS hardening
 
-This is what Ansible would do later — for Tier 0, run by hand on each Vault VM:
+*(2026-10-28 — HOMELAB-26/27)* Implemented by `homelab-infra` `ansible/playbooks/vault-baseline.yaml` (role `vault_baseline`), one node at a time, checked by `vault-verify.yaml`. The commands below are the reference for what it does. Differences:
+
+- The cloud image already ships without swap, with chrony, and with password SSH off. The role holds those and adds the rest.
+- SSH settings go in a drop-in, `/etc/ssh/sshd_config.d/10-homelab-hardening.conf`, which wins over the image's `60-cloudimg-settings.conf`. On Ubuntu the unit is `ssh`, not `sshd`.
+- The 8201 peer rule is three single-address rules; UFW does not accept the comma-separated source below.
+- Allowed and denied paths were tested with temporary listeners: 8200 open from VLAN 10 and 40; 8201 open from a peer; 8201 refused from the workstation and from pve-01; other ports refused.
+
 
 ```bash
 # Hostname (already set via cloud-init, verify)
@@ -366,6 +372,10 @@ sudo ufw enable
 ```
 
 #### 0.4c — Install OpenBao binary
+
+*(2026-10-28 — HOMELAB-26/27)* Implemented by the same playbook: **OpenBao 2.6.5**, pinned by version and SHA256 in `group_vars/vault.yaml`, held with `dpkg --set-selections`. The release's `checksums.txt` was verified with its Sigstore bundle (`cosign verify-blob`) against OpenBao's GitHub release workflow. The commands below are the manual equivalent.
+
+> **What the package does:** `postinst` creates the `openbao` user, a self-signed TLS key/cert in `/opt/openbao/tls` and an empty `/opt/openbao/data`, and does **not** enable or start the service. The unit's `CapabilityBoundingSet=CAP_SYSLOG` leaves out `CAP_IPC_LOCK`, so OpenBao cannot `mlock`. See the note in 0.5a.
 
 On each Vault VM:
 
@@ -416,7 +426,7 @@ Create `/etc/openbao/openbao.hcl` on each Vault VM. Substitute `NODE_HOSTNAME` a
 ui            = true
 cluster_addr  = "https://192.168.40.20:8201"
 api_addr      = "https://192.168.40.20:8200"
-disable_mlock = false
+disable_mlock = false   # see the mlock note below before using this
 
 listener "tcp" {
   address       = "0.0.0.0:8200"
@@ -449,6 +459,8 @@ telemetry {
 
 log_level = "info"
 ```
+
+> **mlock — decide before writing this file *(2026-10-28 — HOMELAB-26/27)*:** the packaged `openbao.service` sets `CapabilityBoundingSet=CAP_SYSLOG`, with no `CAP_IPC_LOCK`, so `disable_mlock = false` is expected to stop the server at startup because it cannot lock memory. Either set `disable_mlock = true`, which HashiCorp recommends for integrated (Raft) storage; swap is already off and the unit sets `MemorySwapMax=0`. Or add a systemd drop-in that grants `CAP_IPC_LOCK`. Record the choice in the Phase 0.5 ticket.
 
 On vault-02 and vault-03, change `cluster_addr`, `api_addr`, and `node_id` to match the host. The `retry_join` block stays identical on all three (each node joins via the other two — order-independent).
 
