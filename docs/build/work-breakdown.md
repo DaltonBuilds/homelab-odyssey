@@ -91,7 +91,7 @@ Tracker mapping: baseline [HOMELAB-36](https://daltonbuilds.youtrack.cloud/issue
 - Story: Install pinned OpenBao 2.6.x `.deb` on all three; service present, not yet enabled.
 
 **Epic [0.5] OpenBao HA cluster initialization** — `openbao`
-- Task: Reconcile bootstrap transport, settled 2026-10-29 (HOMELAB-31): plain-HTTP listener until 0.7d, `cluster_addr` always TLS, secret-bearing commands on localhost over SSH, API firewall narrowed to VLANs 40/10, `disable_mlock = true`.
+- Task: Reconcile bootstrap transport, settled 2026-10-29 (HOMELAB-31): plain-HTTP listener until 0.7d, `cluster_addr` always TLS, secret-bearing commands on localhost over SSH, API firewall narrowed to VLANs 40/10, no `disable_mlock` (mlock removed in OpenBao 2.0).
 - Story: Ansible templates `openbao.hcl` (Raft storage, bootstrap listener) per node; enable service.
 - Story: `bao operator init` on vault-01 over SSH, piped straight into `pass` (GPG-encrypted) + paper copy of 3 keys in the safe.
 - Story: Join vault-02/03 to Raft; enable cluster-wide file audit device on all nodes.
