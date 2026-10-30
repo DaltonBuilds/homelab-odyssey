@@ -594,76 +594,89 @@ Downstream: the raw audit log ships to Loki via Alloy on the substrate VMs (Phas
 
 ### Phase 0.6: Migrate to GCP KMS Auto-Unseal
 
-**Goal:** Vault no longer requires manual unseal after restarts. Unseal happens automatically using a GCP KMS key. Recovery keys replace Shamir keys.
+**Goal:** Vault no longer requires manual unseal after restarts. Unseal happens automatically using a GCP Cloud KMS key. The Shamir unseal keys from Phase 0.5 become **recovery keys**.
 
-#### 0.6a — Create the GCP KMS resources
+> **Reconciled 2026-10-30 (HOMELAB-44) against [OpenBao's seal docs](https://openbao.org/docs/concepts/seal/) and [gcpckms docs](https://openbao.org/docs/configuration/seal/gcpckms/).** Corrections to the earlier draft:
+> - **Migration order:** standbys go first, one at a time, with `-migrate`. Then the active node steps down and a migrated standby performs the migration. The old draft restarted the active node first.
+> - **Recovery keys:** the existing shares become the recovery keys; no new ones are generated.
+> - **Status:** expect `Seal Type gcpckms`, `Recovery Seal Type shamir`.
+> - **Permissions:** the seal also needs `cloudkms.cryptoKeys.get`, which `roles/cloudkms.cryptoKeyEncrypterDecrypter` lacks, so the binding uses a three-permission custom role.
+> - **Secrets:** shares are never typed on the command line, and the SA key never goes through `/tmp`. Ansible installs it from `pass`.
+> - **Portability:** the script runs on macOS.
 
-In your GCP project (the same one used for Secret Manager in v3, or a new dedicated project — see note below):
+> **Recovery keys cannot unseal.** They authorize operations like `bao operator generate-root`, but they can't decrypt the root key. After this phase, unsealing depends on GCP KMS being reachable, the key versions existing and the service-account key being valid. If any of those fails, a restarted node stays sealed and no key you hold will open it. Running nodes keep serving. The accepted-risk record and the per-failure runbook are in 0.6f.
+
+**Decisions (HOMELAB-43):**
+- **Project:** a dedicated GCP project, `homelab-vault`. If the unseal SA key leaks, nothing else lives there.
+- **Tooling:** the GCP resources come from a checked-in, idempotent `gcloud` script in homelab-infra (`gcp/vault-kms.sh`, HOMELAB-45/46). Tier 1 [1.3] imports them into OpenTofu, as it does for the Ansible-created vault VMs.
+- **Credential:** one SA JSON key. Workload Identity Federation with X.509 removes the long-lived key, but it needs this cluster's PKI (Phase 0.7). Tracked in Future Upgrades.
+
+#### 0.6a — Create the project and KMS key (HOMELAB-45)
+
+The script does the following; re-running it changes nothing:
 
 ```bash
-# Set these
-export GCP_PROJECT="homelab-vault"      # or your existing project
-export GCP_REGION="us-central1"
+GCP_PROJECT=homelab-vault
+GCP_REGION=us-central1
 
-# Enable KMS
+gcloud projects create "$GCP_PROJECT" --name="Homelab Vault"
+gcloud billing projects link "$GCP_PROJECT" --billing-account=<BILLING-ACCOUNT-ID>
 gcloud services enable cloudkms.googleapis.com --project="$GCP_PROJECT"
 
-# Create keyring + key
-gcloud kms keyrings create vault-unseal \
-  --location="$GCP_REGION" \
-  --project="$GCP_PROJECT"
+gcloud kms keyrings create vault-unseal --location="$GCP_REGION" --project="$GCP_PROJECT"
 
+# Next rotation in 90 days. BSD date (macOS) first, GNU date as the fallback.
+NEXT=$(date -u -v+90d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+90 days' +%Y-%m-%dT%H:%M:%SZ)
 gcloud kms keys create vault-unseal-key \
-  --location="$GCP_REGION" \
-  --keyring=vault-unseal \
-  --purpose=encryption \
-  --rotation-period=90d \
-  --next-rotation-time=$(date -u -d '+90 days' +%Y-%m-%dT%H:%M:%SZ) \
-  --project="$GCP_PROJECT"
+  --location="$GCP_REGION" --keyring=vault-unseal --project="$GCP_PROJECT" \
+  --purpose=encryption --protection-level=software \
+  --rotation-period=90d --next-rotation-time="$NEXT"
 ```
 
-> **Dedicated project recommendation:** If you used `homelab-forge` (or similar) for GCP SM in v3, consider creating a separate `homelab-vault` project. Smaller blast radius if the KMS service account is compromised — it can't accidentally have IAM grants on other resources. This is the same principle behind separating prod/dev hypervisors.
+> **Never disable or destroy an old key version.** Rotation adds a new primary version. OpenBao keeps decrypting with the version that originally wrapped its root key, so destroying that version is permanent loss of the cluster. Destruction is scheduled (a waiting period applies), and a scheduled version can be restored during that window (0.6f).
 
-#### 0.6b — Create the Vault KMS service account (least privilege)
+#### 0.6b — Least-privilege service account (HOMELAB-46)
 
 ```bash
-# Service account that ONLY has permission to encrypt/decrypt with this one key
-gcloud iam service-accounts create vault-unseal-sa \
-  --display-name="Vault Auto-Unseal" \
-  --project="$GCP_PROJECT"
+SA=vault-unseal-sa@${GCP_PROJECT}.iam.gserviceaccount.com
+gcloud iam service-accounts create vault-unseal-sa --display-name="OpenBao auto-unseal" --project="$GCP_PROJECT"
 
-# Grant only the specific role on the specific key — not project-wide
+# Exactly what the gcpckms seal uses: encrypt, decrypt, and key metadata at startup
+gcloud iam roles create vaultUnseal --project="$GCP_PROJECT" --title="OpenBao auto-unseal" \
+  --permissions=cloudkms.cryptoKeyVersions.useToEncrypt,cloudkms.cryptoKeyVersions.useToDecrypt,cloudkms.cryptoKeys.get
+
+# Bound on the one key only. No project-level roles for this SA.
 gcloud kms keys add-iam-policy-binding vault-unseal-key \
-  --location="$GCP_REGION" \
-  --keyring=vault-unseal \
-  --member="serviceAccount:vault-unseal-sa@${GCP_PROJECT}.iam.gserviceaccount.com" \
-  --role="roles/cloudkms.cryptoKeyEncrypterDecrypter" \
-  --project="$GCP_PROJECT"
-
-# Generate JSON key (this is the one credential that has to live on disk on each Vault VM)
-gcloud iam service-accounts keys create ~/vault-unseal-sa.json \
-  --iam-account=vault-unseal-sa@${GCP_PROJECT}.iam.gserviceaccount.com \
-  --project="$GCP_PROJECT"
+  --location="$GCP_REGION" --keyring=vault-unseal --project="$GCP_PROJECT" \
+  --member="serviceAccount:${SA}" --role="projects/${GCP_PROJECT}/roles/vaultUnseal"
 ```
 
-> **Defense-relevant note:** This service account has *exactly one* permission scoped to *exactly one* key. If the JSON key leaks, an attacker can encrypt/decrypt blobs using your KMS key but cannot list other resources, escalate privileges, or pivot. Document this scoping decision in your eventual ADR — it's the kind of least-privilege practice that maps directly to FedRAMP/DoD IL requirements.
-
-#### 0.6c — Distribute the SA key to all Vault VMs
+The JSON key is the one credential that lives on the Vault VMs. Create it straight into `pass`, held in a shell variable first (the Phase 0.5b lesson):
 
 ```bash
-# From your workstation
-for HOST in 192.168.40.20 192.168.40.21 192.168.40.22; do
-  scp ~/vault-unseal-sa.json dalton@${HOST}:/tmp/vault-unseal-sa.json
-  ssh dalton@${HOST} 'sudo install -o openbao -g openbao -m 0400 /tmp/vault-unseal-sa.json /etc/openbao/gcp-kms.json && rm /tmp/vault-unseal-sa.json'
-done
-
-# Securely delete from your workstation
-shred -u ~/vault-unseal-sa.json
+# Plain terminal: no session recording, no AI-assisted shell
+KEY=$(gcloud iam service-accounts keys create - --iam-account="$SA" --project="$GCP_PROJECT") \
+  && printf '%s' "$KEY" | pass insert -m homelab/vault/gcp-kms-sa \
+  && pass show homelab/vault/gcp-kms-sa | jq -e '.type == "service_account"' >/dev/null \
+  && echo ok && unset KEY
 ```
 
-#### 0.6d — Update Vault config with `seal` stanza
+> **Defense-relevant note:** this service account has *exactly three* permissions on *exactly one* key. If the JSON key leaks, an attacker can encrypt and decrypt blobs with that key. They can't list other resources, escalate or pivot, and with no network path to the cluster they can't use the key against it. Rotate the SA key on a schedule: create a new key, redeploy via Ansible, restart nodes one at a time (each auto-unseals), then delete the old key.
 
-On each Vault VM, edit `/etc/openbao/openbao.hcl` and add:
+#### 0.6c — Install the credential and pre-flight every node (HOMELAB-47)
+
+`vault_baseline` installs `/etc/openbao/gcp-kms.json` (`openbao:openbao 0400`) on all three nodes from `pass` at run time (`lookup('pipe', 'pass show homelab/vault/gcp-kms-sa')`, with `no_log: true`). The key never sits in a workstation file or `/tmp`. Verify checks presence, owner, mode and checksum, never content.
+
+Before touching the running seal, prove each node can reach KMS and encrypt with it. Use a **copy** of the config with the gcpckms stanza and a **scratch** storage path. Diagnose's storage check creates Raft files, so never point it at `/opt/openbao/data`:
+
+```bash
+# On each node; expect "Check Autounseal Encryption" success
+sudo -u openbao bao operator diagnose -config=/tmp/openbao-preflight.hcl
+```
+
+#### 0.6d — The `seal` stanza (Ansible template)
+
+A per-host variable, `vault_baseline_openbao_seal: gcpckms` (default `shamir`), adds this block to `openbao.hcl`:
 
 ```hcl
 seal "gcpckms" {
@@ -675,51 +688,58 @@ seal "gcpckms" {
 }
 ```
 
-> **DO NOT** restart Vault yet. The seal stanza alone doesn't migrate — it sets up the new seal mechanism. The migration is a one-time command.
+A seal change takes effect only on **restart**; a reload doesn't apply it. The role never restarts OpenBao, so each node gets the stanza as one step of 0.6e.
 
-> **OpenBao seal deprecation gate (v5.1):** The built-in `gcpckms` seal used above is **deprecated in OpenBao 2.6 and removed in 2.7** — from 2.7 it exists only as an external KMS plugin (openbao-plugins repo). This build pins 2.6.x, where the stanza works as-is. **Migrating the seal to the external plugin is a hard prerequisite before any upgrade past 2.6.x** — it is the same seal-migration operation rehearsed in this phase, so it is a feature, not a chore. Tracked in Future Upgrades. Related caution: OpenBao 2.5.0 shipped a seal-breaking bug (auto-unseal failed with "cipher: message authentication failed"; fixed in 2.5.1) — always pin exact versions and rehearse upgrades on a scratch single-node instance before touching this cluster.
+> **OpenBao seal deprecation gate (v5.1):** the built-in `gcpckms` seal is **deprecated in OpenBao 2.6 and removed in 2.7**; from 2.7 it exists only as an external KMS plugin (openbao-plugins). This build pins 2.6.x, where the stanza works as-is. **Migrating to the external plugin is a hard prerequisite for any upgrade past 2.6.x.** It's the same seal-migration operation rehearsed here. Tracked in Future Upgrades. Related caution: OpenBao 2.5.0 shipped a seal-breaking bug (fixed in 2.5.1). Always pin exact versions and rehearse upgrades on a scratch single-node instance first.
 
-#### 0.6e — Perform the seal migration
+#### 0.6e — Perform the seal migration (HOMELAB-48)
+
+Prerequisites: Phase 0.5 verified, including the failover test; 0.6c passed on all three nodes; you're on the LAN with the Shamir shares in `pass`. Expect a short period without an active node when the leader steps down.
 
 ```bash
-# On vault-01, with Vault still running under Shamir keys
-export VAULT_ADDR=http://127.0.0.1:8200
+# 0. Backup and plan (owner, root token; snapshot stays off the nodes)
+#    bao operator raft snapshot save → store it safely; record size and time only
+#    bao status on each node → note which one is active
 
-# Restart Vault to load the new seal stanza (it will come up sealed — expected)
-sudo systemctl restart openbao
+# 1. Each STANDBY, one at a time:
+ansible-playbook ansible/playbooks/vault-baseline.yaml --limit <standby> -e vault_baseline_openbao_seal=gcpckms
+ssh <standby> 'sudo systemctl restart openbao'
+ssh -t <standby> 'VAULT_ADDR=http://127.0.0.1:8200 bao operator unseal -migrate'   # ×3, prompted; Shamir shares
+#    Confirm unsealed and back as a follower before the next standby.
 
-# Provide unseal keys with -migrate flag
-bao operator unseal -migrate <unseal-key-1>
-bao operator unseal -migrate <unseal-key-2>
-bao operator unseal -migrate <unseal-key-3>
+# 2. Step down the ACTIVE node (owner, root token); a migrated standby takes over and migrates
+ssh -t <active> 'export VAULT_ADDR=http://127.0.0.1:8200; bao login; bao operator step-down; rm -f ~/.vault-token'
+#    Watch the new active node's journal for seal migration success.
 
-# Vault is now unsealed AND migrated. From this point forward, restarts auto-unseal.
-bao status
-# Look for: Recovery Seal Type: gcpckms
+# 3. The old active node: apply the stanza, restart, and it auto-unseals
+ansible-playbook ansible/playbooks/vault-baseline.yaml --limit <old-active> -e vault_baseline_openbao_seal=gcpckms
+ssh <old-active> 'sudo systemctl restart openbao'
 
-# Repeat the restart on vault-02 and vault-03 (they don't need the -migrate flag since
-# the cluster state already migrated; they just need to pick up the new seal config)
-sudo systemctl restart openbao   # on vault-02 — auto-unseals
-sudo systemctl restart openbao   # on vault-03 — auto-unseals
+# 4. Every node
+bao status    # Seal Type gcpckms, Recovery Seal Type shamir, Sealed false
 ```
 
-> **What happens during migration:** OpenBao rewraps its master key with the GCP KMS key. The Shamir unseal keys are retired and replaced by *recovery keys*. Recovery keys are still required for operations like `bao operator generate-root` — keep them safe — but they aren't needed for routine unseal.
+Then set `vault_baseline_openbao_seal: gcpckms` in `group_vars/vault.yaml`, check that a repeat `--check` shows no changes, and run `vault-verify.yaml`.
 
-#### 0.6f — Generate new recovery keys output
+#### 0.6f — Recovery keys and the KMS-loss runbook (HOMELAB-49)
 
-After migration, Vault generated 5 new recovery keys (printed during the migrate operation). Save them:
+- [ ] The Shamir shares in `pass` (`homelab/vault-init-shamir`) are now the **recovery keys**. Relabel them (`homelab/vault/recovery-keys`) and relabel the paper copy in the safe. Same values; there are no new keys to capture.
+- [ ] Record the accepted risk (ADR-006 amendment): unsealing now depends on GCP KMS, and recovery keys cannot unseal.
+- [ ] Runbook, by failure:
+  - internet or GCP outage: running nodes keep serving; don't restart healthy nodes; restarted ones unseal once KMS is reachable again;
+  - SA key revoked or expired: new key (0.6b), redeploy via Ansible, restart one node at a time;
+  - key version scheduled for destruction: restore it within the waiting period;
+  - project deleted: undelete within its recovery window;
+  - permanent key loss: the cluster can't be recovered; restore a Raft snapshot onto a new cluster with a new seal.
 
-- [ ] Capture the recovery keys from the migration output
-- [ ] Store the recovery keys encrypted in `pass` under `homelab/vault-recovery-keys`
-- [ ] Print a paper copy of recovery keys 1, 2, 3 for the physical safe
-- [ ] Archive the old `vault-init.json` Shamir entry — it's now historical
+#### Verification (HOMELAB-50)
 
-#### Verification
-
-- [ ] Power off all three Vault VMs simultaneously, wait 30 seconds, power them back on. They auto-unseal without any manual intervention. `bao status` from your workstation against each shows unsealed.
-- [ ] `bao status` shows `Recovery Seal Type: gcpckms`
-- [ ] Recovery keys safely stored in two places (encrypted digital + physical paper)
-- [ ] Running version is pinned 2.6.x (built-in `gcpckms` seal still present; seal-plugin migration is a hard gate before any 2.7+ upgrade — see Future Upgrades)
+- [ ] Power off all three Vault VMs simultaneously, wait 30 seconds, power them back on. They auto-unseal without any manual intervention; record boot-to-unsealed time per node; three voters and one leader return.
+- [ ] Restart one standby's service: it auto-unseals and rejoins. Stop the active node: a new leader within about 5 s; the old one restarts and auto-unseals.
+- [ ] `bao status` shows `Seal Type gcpckms` and `Recovery Seal Type shamir` on every node
+- [ ] Audit log still writing on the active node; rotation still works
+- [ ] Recovery keys safely stored in two places (encrypted digital + physical paper), relabelled
+- [ ] Running version is pinned 2.6.x (built-in `gcpckms` seal still present; the seal-plugin migration is a hard gate before any 2.7+ upgrade; see Future Upgrades)
 
 ---
 

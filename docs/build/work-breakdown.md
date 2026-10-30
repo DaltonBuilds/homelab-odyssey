@@ -98,9 +98,13 @@ Tracker mapping: baseline [HOMELAB-36](https://daltonbuilds.youtrack.cloud/issue
 - Story (verify): `raft list-peers` = 3 voters; all unsealed; audit log rotating.
 
 **Epic [0.6] Migrate to GCP KMS auto-unseal** — `openbao`, `security`
-- Story: Create KMS keyring + key; scoped service account (encrypt/decrypt on the one key only); JSON key onto each VM.
-- Story: Add `seal "gcpckms"` stanza; migrate with `-migrate` on vault-01; restart vault-02/03.
-- Story (verify): cold-restart all three → auto-unseal, no human; `Recovery Seal Type: gcpckms`. Archive Shamir keys.
+- Task: Reconcile the build guide with OpenBao's seal-migration procedure (HOMELAB-44).
+- Story: `homelab-vault` project + KMS keyring/key from a checked-in, idempotent gcloud script (HOMELAB-45).
+- Story: Service account with a three-permission custom role on the one key; JSON key straight into `pass` (HOMELAB-46).
+- Story: Ansible installs the credential from `pass`, templates `seal "gcpckms"` behind a variable, pre-flights KMS from every node (HOMELAB-47).
+- Story: Migrate: Raft snapshot, standbys one at a time with `-migrate`, then step down the active node (HOMELAB-48).
+- Story: Shamir shares relabelled as recovery keys; KMS-loss risk recorded; runbook per failure (HOMELAB-49).
+- Story (verify): cold-restart all three → auto-unseal, no human; `Seal Type gcpckms`, `Recovery Seal Type shamir`; failover under the new seal (HOMELAB-50).
 
 **Epic [0.7] PKI engine — root + intermediate CA** — `openbao`, `security`
 - Story: Mount root PKI (10y), generate self-signed root, set issuing/CRL URLs.

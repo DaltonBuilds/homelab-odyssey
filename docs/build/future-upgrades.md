@@ -17,6 +17,14 @@ Not part of v5 scope. Documented here so they don't get lost — and so the next
 
 **Effort:** One evening. Install the gcpckms seal plugin from the openbao-plugins repo, perform a seal migration (the same `-migrate` operation rehearsed in Phase 0.5→0.6), verify the cold-restart auto-unseal test from the Tier 0 gate still passes. Rehearse on a scratch single-node instance first.
 
+## Keyless KMS Auto-Unseal via Workload Identity Federation
+
+**What it is:** Phase 0.6 authenticates the `gcpckms` seal with a long-lived service-account JSON key on each Vault VM (HOMELAB-46). GCP Workload Identity Federation with X.509 certificates swaps that key for a short-lived credential obtained by presenting a client certificate, so no static GCP secret lives on the nodes.
+
+**Why later:** It needs a trusted certificate authority to issue the node certificates, and that's this cluster's own PKI (Phase 0.7). Before then there's nothing to anchor the trust in.
+
+**Trigger to revisit:** After Phase 0.7, and naturally alongside the seal-plugin migration above, since both touch the seal configuration. Verify that the seal (built-in or plugin) accepts an external-account credential config before committing.
+
 ## OpenBao Namespaces *(optional exploration)*
 
 **What it is:** Multi-tenant isolation inside one OpenBao cluster — an Enterprise-only feature in HashiCorp Vault that OpenBao ships as OSS, including per-namespace sealing (2.6).
