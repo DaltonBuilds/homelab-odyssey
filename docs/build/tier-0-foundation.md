@@ -480,26 +480,32 @@ The `retry_join` blocks are identical on all three nodes. Each node tries every 
 
 #### 0.5b — Initialize the cluster (vault-01 only)
 
-Run init on vault-01 against its localhost listener, over SSH from the workstation. Pipe the output straight into `pass`. It travels inside the SSH session, is GPG-encrypted on arrival, and is never written to disk in plaintext on either machine:
+Run init on vault-01 against its localhost listener, over SSH from the workstation. The output travels inside the SSH session, is held only in a shell variable, and goes into `pass` (GPG-encrypted) before the variable is cleared. It is never written to disk in plaintext on either machine.
+
+> **Never pipe init straight into `pass` *(2026-10-30 — HOMELAB-32)*.** The first attempt did, on a workstation without `pass`. zsh still ran the `ssh` side of the pipeline, so vault-01 initialized and the shares went into a closed pipe. With no keys, the only fix was resetting the never-used data directory. Holding the output in a variable means a failing `pass` step loses nothing: fix it and pipe `"$OUT"` again.
 
 ```bash
 # From the workstation. Use a plain terminal: no session recording, no AI-assisted shell.
-ssh dalton@192.168.40.20 'VAULT_ADDR=http://127.0.0.1:8200 bao status' ; echo "exit=$?"
-# Expect Initialized=false; bao status exits 2 while sealed. Stop if Initialized=true.
 
-ssh dalton@192.168.40.20 \
-  'VAULT_ADDR=http://127.0.0.1:8200 bao operator init -key-shares=5 -key-threshold=3 -format=json' \
-  | pass insert -m homelab/vault-init-shamir
+# 1. Prove the store works first (needs pass + a GPG key; brew install pass pinentry-mac)
+echo test | pass insert -m homelab/smoke && pass show homelab/smoke && pass rm -f homelab/smoke
+pass ls homelab/vault-init-shamir 2>/dev/null && echo "STOP: entry exists"   # expect no output
 
-# Confirm the entry holds 5 shares without printing anything
-pass show homelab/vault-init-shamir | jq -e '.unseal_keys_b64 | length == 5' >/dev/null && echo ok
+# 2. vault-01 must be uninitialized
+ssh dalton@192.168.40.20 'VAULT_ADDR=http://127.0.0.1:8200 bao status | grep Initialized'   # expect false
+
+# 3. Init, store, check without printing, clear
+OUT=$(ssh dalton@192.168.40.20 'VAULT_ADDR=http://127.0.0.1:8200 bao operator init -key-shares=5 -key-threshold=3 -format=json') \
+  && printf '%s' "$OUT" | pass insert -m homelab/vault-init-shamir \
+  && pass show homelab/vault-init-shamir | jq -e '.unseal_keys_b64 | length == 5' >/dev/null \
+  && echo ok && unset OUT
 ```
 
-If init fails, the pipe stores an empty entry. Check the exit status and the `ok` line before continuing.
+No `ok`? **Keep the terminal open.** `$OUT` still holds the keys; fix the problem and rerun only the `printf … | pass insert` line. Back up the GPG key too (`gpg --export-secret-keys --armor <KEY-ID>` to offline media in the safe). Without it the `pass` entry is unreadable, and the paper copy holds only 3 of the 5 shares.
 
 > **CRITICAL — this entry is the cluster's only key:** it contains 5 unseal keys + the initial root token. Until Phase 0.6 migrates to auto-unseal, these unseal keys are the *only* way to bring Vault back up after a restart.
 >
-> **Storage plan:** (1) GPG-encrypted in `pass` under `homelab/vault-init-shamir` (done by the pipe above; confirm with `pass ls homelab`, not `pass show`). (2) Print a paper copy of unseal keys 1, 2, 3 and store it in a physical safe; print from an offline step, not a shared printer queue. (3) After the Phase 0.6 migration, archive: these Shamir keys are superseded by the auto-unseal recovery keys.
+> **Storage plan:** (1) GPG-encrypted in `pass` under `homelab/vault-init-shamir` (done by step 3 above; confirm with `pass ls homelab`, not `pass show`). (2) Print a paper copy of unseal keys 1, 2, 3 and store it in a physical safe; print from an offline step, not a shared printer queue. (3) After the Phase 0.6 migration, archive: these Shamir keys are superseded by the auto-unseal recovery keys.
 
 #### 0.5c — Unseal all three nodes
 
