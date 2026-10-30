@@ -607,7 +607,7 @@ Downstream: the raw audit log ships to Loki via Alloy on the substrate VMs (Phas
 > **Recovery keys cannot unseal.** They authorize operations like `bao operator generate-root`, but they can't decrypt the root key. After this phase, unsealing depends on GCP KMS being reachable, the key versions existing and the service-account key being valid. If any of those fails, a restarted node stays sealed and no key you hold will open it. Running nodes keep serving. The accepted-risk record and the per-failure runbook are in 0.6f.
 
 **Decisions (HOMELAB-43):**
-- **Project:** a dedicated GCP project, `homelab-vault`. If the unseal SA key leaks, nothing else lives there.
+- **Project:** a dedicated GCP project, `daltonbuilds-homelab-vault` (number 598884619232; IDs are global and `homelab-vault` was taken). If the unseal SA key leaks, nothing else lives there. Created 2026-10-30.
 - **Tooling:** the GCP resources come from a checked-in, idempotent `gcloud` script in homelab-infra (`gcp/vault-kms.sh`, HOMELAB-45/46). Tier 1 [1.3] imports them into OpenTofu, as it does for the Ansible-created vault VMs.
 - **Credential:** one SA JSON key. Workload Identity Federation with X.509 removes the long-lived key, but it needs this cluster's PKI (Phase 0.7). Tracked in Future Upgrades.
 
@@ -616,7 +616,7 @@ Downstream: the raw audit log ships to Loki via Alloy on the substrate VMs (Phas
 The script does the following; re-running it changes nothing:
 
 ```bash
-GCP_PROJECT=homelab-vault
+GCP_PROJECT=daltonbuilds-homelab-vault
 GCP_REGION=us-central1
 
 gcloud projects create "$GCP_PROJECT" --name="Homelab Vault"
@@ -681,7 +681,7 @@ A per-host variable, `vault_baseline_openbao_seal: gcpckms` (default `shamir`), 
 ```hcl
 seal "gcpckms" {
   credentials = "/etc/openbao/gcp-kms.json"
-  project     = "homelab-vault"
+  project     = "daltonbuilds-homelab-vault"
   region      = "us-central1"
   key_ring    = "vault-unseal"
   crypto_key  = "vault-unseal-key"
