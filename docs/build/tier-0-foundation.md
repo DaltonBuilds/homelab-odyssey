@@ -538,19 +538,30 @@ rm -f ~/.vault-token   # bao login caches the root token here; don't leave it on
 
 #### 0.5e — Enable the file audit device *(v5.1 — gap fix)*
 
-Later tiers assume an audit trail exists (Phase 1.6's OTP verification, the Tier 1/2 gates, the Sloth SLO on `vault_audit_log_request_failure`) — but nothing previously enabled one. Enable it now, immediately after init, so everything from PKI bootstrap onward is on the record:
+Later tiers assume an audit trail exists (Phase 1.6's OTP verification, the Tier 1/2 gates, the Sloth SLO on `vault_audit_log_request_failure`) — but nothing previously enabled one. Enable it now, immediately after init, so everything from PKI bootstrap onward is on the record.
+
+> **Declared in config, not enabled over the API *(2026-10-30 — HOMELAB-34)*.** OpenBao 2.6 rejects `bao audit enable` with *"cannot enable audit device via API; use declarative, config-based audit device management instead"*. The device goes in `openbao.hcl`, identical on every node. The active node applies it at startup or on SIGHUP. `systemctl reload openbao` sends SIGHUP and does **not** reseal, so no unseal is needed. Ansible's `vault_baseline` templates the stanza, creates the directory and reloads changed nodes.
+
+```hcl
+# In /etc/openbao/openbao.hcl on all three nodes (Ansible template)
+audit "file" "file" {
+  description = "Local file audit log, rotated by logrotate (HOMELAB-34)"
+  options {
+    file_path = "/opt/openbao/audit/audit.log"
+  }
+}
+```
 
 ```bash
-# Audit-log directory on ALL three nodes (each node writes its own copy)
+# Audit-log directory on ALL three nodes (Ansible; the active node writes its own copy)
 sudo install -d -o openbao -g openbao -m 0750 /opt/openbao/audit
-
-# Enable once, from any node — audit devices are cluster-wide config
-bao audit enable file file_path=/opt/openbao/audit/audit.log
+sudo systemctl reload openbao   # Ansible does this when the config changes
+sudo journalctl -u openbao | grep "enabled audit backend"   # expect path=file/ type=file
 ```
 
 > **Failure semantics — know this before it bites:** with a single audit device, if OpenBao cannot write to it (disk full, permissions), it **blocks all requests** rather than proceed unaudited. That is the compliance-correct behavior — and the reason the Vault-VM disk alerts in Phase 3.5e are not optional. Keep audit-disk headroom alerting tight.
 
-Logrotate on each node (audit logs grow fast; a HUP makes OpenBao reopen the file). Ansible's `vault_baseline` installs this file, and it creates the audit directory above (HOMELAB-34). The packaged unit's `ExecReload` sends SIGHUP to the main process only, so the rule uses `systemctl reload` rather than `systemctl kill`, which signals the whole cgroup *(2026-10-29)*:
+Logrotate on each node (audit logs grow fast; a HUP makes OpenBao reopen the file). Ansible's `vault_baseline` installs this file too (HOMELAB-34). The packaged unit's `ExecReload` sends SIGHUP to the main process only, so the rule uses `systemctl reload` rather than `systemctl kill`, which signals the whole cgroup *(2026-10-29)*:
 
 ```bash
 sudo tee /etc/logrotate.d/openbao-audit << 'LOGEOF'
@@ -577,7 +588,7 @@ Downstream: the raw audit log ships to Loki via Alloy on the substrate VMs (Phas
 - [ ] `bao operator raft list-peers`: 3 voters listed
 - [ ] Kill the Raft leader (e.g., `sudo systemctl stop openbao` on vault-01) — a new leader is elected within ~5 seconds. Restart vault on vault-01 and confirm it rejoins as a follower.
 - [ ] `vault-init.json` encrypted in `pass` AND a paper copy of 3 unseal keys exists physically
-- [ ] `bao audit list` shows the file device; entries appear in `/opt/openbao/audit/audit.log` as you run commands; logrotate config present on all three nodes
+- [ ] `bao audit list` shows the file device (or the active node's journal shows `enabled audit backend: path=file/`); entries appear in `/opt/openbao/audit/audit.log` as you run commands; logrotate config present on all three nodes
 
 ---
 
