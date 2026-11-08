@@ -58,6 +58,13 @@ These ADRs capture the reasoning behind the v5 changes so the next reader (you i
 
 **Consequences.** Tier 0 changes: install from OpenBao's GitHub-release `.deb` (no vendor apt repo), config at `/etc/openbao/openbao.hcl`, service `openbao`, every `vault <cmd>` becomes `bao <cmd>`. **Version pinning is now a discipline, not a preference:** 2.5.0 shipped a seal-breaking auto-unseal bug (fixed in 2.5.1), and the built-in `gcpckms` seal is deprecated in 2.6 / **removed in 2.7** in favor of external seal plugins — the plugin migration is a hard gate before any 2.7+ upgrade (see Future Upgrades). Telemetry keeps the `vault_` metric prefix, so Tier 3 dashboards and SLOs are unchanged.
 
+- **Amendment (2026-11-08): auto-unseal depends on GCP Cloud KMS, an accepted risk.** Phase 0.6 moved the cluster from Shamir to the built-in `gcpckms` seal (HOMELAB-48). Since then, every node unseals on start by calling Cloud KMS in `daltonbuilds-homelab-vault` with a service-account key. The Shamir shares became **recovery keys, which cannot unseal**. Consequences, accepted deliberately:
+  1. **Restarts need GCP.** If a node restarts while the internet, DNS or GCP is unavailable, it stays sealed until KMS is back. Running nodes keep serving.
+  2. **The key is the backup's backup.** If the key version that wraps the root key is destroyed, the data can't be recovered, Raft snapshots included. Mitigations: only the owner can disable or destroy versions; destruction has a 30-day window; nothing automated touches versions.
+  3. **One long-lived credential per node.** An SA key with exactly encrypt, decrypt and `cryptoKeys.get` on that one key, rotated yearly until keyless Workload Identity Federation replaces it after Phase 0.7.
+
+  **Why accept it:** hands-off restarts are the point of Phase 0.6, and later tiers assume the Vault tier returns after a power event without a human on the LAN. The failure modes are bounded and documented in [OpenBao auto-unseal recovery](openbao-unseal-recovery.md). A homelab rarely restarts all three nodes during a GCP or ISP outage. **Revisit if:** the lab must run disconnected (air-gapped rehearsal; consider a local HSM or Transit seal), outages start coinciding with restarts, or OpenBao gains multi-seal support worth using. Tracked in HOMELAB-49.
+
 ### ADR-007 — OpenTofu everywhere *(v5.1)*
 
 **Context.** v5 used Terraform (BUSL-licensed) in the main repos and OpenTofu only for the ephemeral clusters (ADR-004). After ADR-006 moved the secrets tier to OpenBao partly on license grounds, that split reads as accidental rather than deliberate.

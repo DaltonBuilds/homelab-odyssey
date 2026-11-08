@@ -723,18 +723,22 @@ ssh <old-active> 'sudo systemctl restart openbao'
 bao status    # Seal Type gcpckms, Recovery Seal Type shamir, Sealed false
 ```
 
+> **Expect `500`s on migrated standbys *(seen 2026-11-08, HOMELAB-48)*.** Between a standby's `unseal -migrate` and the active node's migration, that standby answers `sys/seal-status` and `sys/health` with 500 *"barrier seal type of shamir does not match loaded type of gcpckms"*. It's unsealed and replicating Raft meanwhile; the error clears when the active node migrates. On this cluster: about 0.56 s without a leader at step-down, migration took 0.37 s, and the old active node auto-unsealed 0.74 s after its restart.
+>
+> The pre-migration Raft snapshot was skipped deliberately on 2026-11-08 because the cluster held no data. Take it whenever the cluster holds real secrets.
+
 Then set `vault_baseline_openbao_seal: gcpckms` in `group_vars/vault.yaml`, check that a repeat `--check` shows no changes, and run `vault-verify.yaml`.
 
 #### 0.6f — Recovery keys and the KMS-loss runbook (HOMELAB-49)
 
-- [ ] The Shamir shares in `pass` (`homelab/vault-init-shamir`) are now the **recovery keys**. Relabel them (`homelab/vault/recovery-keys`) and relabel the paper copy in the safe. Same values; there are no new keys to capture.
+- [ ] The Shamir shares are now the **recovery keys**: `pass mv homelab/vault-init-shamir homelab/vault/recovery-keys` (the entry still holds the initial root token too) and relabel the paper copy in the safe. Same values; there are no new keys to capture.
 - [ ] Record the accepted risk (ADR-006 amendment): unsealing now depends on GCP KMS, and recovery keys cannot unseal.
-- [ ] Runbook, by failure:
+- [ ] Runbook, by failure, in [OpenBao auto-unseal recovery](openbao-unseal-recovery.md):
   - internet or GCP outage: running nodes keep serving; don't restart healthy nodes; restarted ones unseal once KMS is reachable again;
   - SA key revoked or expired: new key (0.6b), redeploy via Ansible, restart one node at a time;
   - key version scheduled for destruction: restore it within the waiting period;
   - project deleted: undelete within its recovery window;
-  - permanent key loss: the cluster can't be recovered; restore a Raft snapshot onto a new cluster with a new seal.
+  - permanent key loss: the data can't be recovered, **Raft snapshots included**, because a snapshot needs the same seal. Re-initialize and re-enter secrets from their sources. Protect the key, not the backups.
 
 #### Verification (HOMELAB-50)
 
