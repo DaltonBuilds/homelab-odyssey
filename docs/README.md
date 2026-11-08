@@ -12,6 +12,7 @@ This is the entry point for the build. Work through the tiers **sequentially** �
 - [Architecture Decision Records](build/01-adrs.md) — ADR-001 … ADR-013
 - [Proxmox baseline and remote management](build/proxmox-baseline.md) — Phase 0.1 Ansible adoption, managed Tailscale and recovery checks
 - [Network Reference](build/02-network-reference.md) — VLAN plan, BGP ASNs, IP allocation, LB pools
+- [OpenBao auto-unseal recovery](build/openbao-unseal-recovery.md) — what the GCP KMS seal depends on, what recovery keys can't do, and recovery per failure
 
 ## Canonical build order
 
