@@ -667,12 +667,16 @@ KEY=$(gcloud iam service-accounts keys create - --iam-account="$SA" --project="$
 
 `vault_baseline` installs `/etc/openbao/gcp-kms.json` (`openbao:openbao 0400`) on all three nodes from `pass` at run time (`lookup('pipe', 'pass show homelab/vault/gcp-kms-sa')`, with `no_log: true`). The key never sits in a workstation file or `/tmp`. Verify checks presence, owner, mode and checksum, never content.
 
-Before touching the running seal, prove each node can reach KMS and encrypt with it. Use a **copy** of the config with the gcpckms stanza and a **scratch** storage path. Diagnose's storage check creates Raft files, so never point it at `/opt/openbao/data`:
+Before touching the running seal, prove each node can reach KMS and encrypt and decrypt with it. `vault-kms-preflight.yaml` runs a **throwaway OpenBao server** on each node as a transient systemd unit (loopback ports 18200/18201, Raft in a scratch directory, the gcpckms seal). Initializing it makes KMS encrypt a root key, and restarting it must auto-unseal, which makes KMS decrypt. It then removes everything and checks that all three nodes hold the same credential. The running cluster isn't touched:
 
 ```bash
-# On each node; expect "Check Autounseal Encryption" success
-sudo -u openbao bao operator diagnose -config=/tmp/openbao-preflight.hcl
+mise exec -- ansible-playbook ansible/playbooks/vault-kms-preflight.yaml
+# expect, per node: seal type gcpckms, initialized True, sealed False after restart
 ```
+
+> **Not `bao operator diagnose` *(2026-11-08)*.** In OpenBao 2.6.5, diagnose's `setSeal()` never assigns `barrierWrapper`, so "Check Autounseal Encryption" panics with a nil pointer for every auto seal. It only works for Shamir, where the check is skipped.
+
+> **gpg-agent needs a pinentry** for Ansible's `pass` lookup: `pinentry-program /opt/homebrew/bin/pinentry-mac` in `~/.gnupg/gpg-agent.conf`. Without it GPG fails with "No such file or directory".
 
 #### 0.6d — The `seal` stanza (Ansible template)
 
