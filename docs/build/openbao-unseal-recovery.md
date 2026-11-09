@@ -29,16 +29,19 @@ The five Shamir shares from init are now **recovery keys** (`bao status`: `Recov
 | GPG key that opens `pass` | Workstation + offline export in the safe | Without it, the `pass` entries are unreadable |
 | SA key (`vault-unseal-sa`) | `pass` → `homelab/vault/gcp-kms-sa`; nodes `/etc/openbao/gcp-kms.json` (`openbao 0400`) | Created 2026-10-30; rotate yearly |
 | KMS key | GCP, `daltonbuilds-homelab-vault` | Only the owner's account can disable or destroy versions |
+| Root CA key (offline) | `pass` → `homelab/pki/root-ca-key` + passphrase-encrypted copy in the safe | Never on a node; needed only to sign a new intermediate (Phase 0.7b) |
 
 ## First look: is it the seal?
 
 ```bash
-# on the node
-VAULT_ADDR=http://127.0.0.1:8200 bao status        # Sealed true + Seal Type gcpckms → the unseal path failed
+# on the node (before Phase 0.7d: VAULT_ADDR=http://127.0.0.1:8200, no VAULT_CACERT)
+VAULT_ADDR=https://127.0.0.1:8200 VAULT_CACERT=/etc/openbao/ca.pem bao status   # Sealed true + Seal Type gcpckms → the unseal path failed
 sudo journalctl -u openbao -b --no-pager | grep -iE 'seal|kms|oauth|google|permission|denied|unavailable'
 curl -s -o /dev/null -w '%{http_code}\n' https://cloudkms.googleapis.com/   # 404 = reachable; 000 = no egress
 chronyc tracking | grep 'System time'                                       # badly wrong clock breaks OAuth
 ```
+
+If `bao status` fails with `certificate has expired` or `unknown authority` instead, the problem is the listener certificate, not the seal: see the renewal failure modes in Phase 0.7e.
 
 From the workstation, `gcp/vault-kms.sh check` (homelab-infra) reports the project, billing, API, key and rotation, SA, role, binding and SA keys in one pass. It's read-only.
 

@@ -18,7 +18,7 @@
 - **0.4** — Vault VM provisioning (bootstrap-mode, manual)
 - **0.5** — Vault HA cluster initialization (Shamir → migrate to GCP KMS)
 - **0.6** — Vault auto-unseal via GCP KMS
-- **0.7** — PKI engine: internal root + intermediate CA
+- **0.7** — PKI: offline root, OpenBao intermediate, TLS listener with automated renewal
 - **0.8** — Transit engine: encryption-as-a-service
 - **0.9** — SSH OTP engine: ephemeral host access
 - **0.10** — Database engine: enabled, connection definitions deferred to Tier 4
@@ -751,181 +751,264 @@ Then set `vault_baseline_openbao_seal: gcpckms` in `group_vars/vault.yaml`, chec
 
 ---
 
-### Phase 0.7: PKI Engine — Internal Root + Intermediate CA
+### Phase 0.7: PKI — Offline Root, OpenBao Intermediate, TLS Listener
 
-**Goal:** Vault becomes the internal certificate authority. cert-manager will use this CA (via the Vault issuer) to issue short-lived certs to internal services starting in Tier 2.
+**Goal:** OpenBao becomes the homelab's internal certificate authority, and its own API moves from the Phase 0.5 plain-HTTP bootstrap to TLS with a certificate it issues and renews itself. Later tiers depend on this: cert-manager's Vault issuer and ESO (Tier 2), node and agent trust at `/etc/ssl/certs/homelab-root-ca.crt` (Tiers 1–3), and `https://vault.homelab.internal:8200`.
 
-> **Two-tier CA pattern:** A root CA signs an intermediate CA; the intermediate signs leaf certificates. The root stays offline-style (we'll generate it, use it once, then disable the mount until rotation time). The intermediate handles day-to-day issuance. This matches the X.509 best practice that "root keys are precious; intermediates are operational."
+> **Reconciled 2026-11-08 (HOMELAB-52)** with the HOMELAB-51 decisions and what Phases 0.5–0.6 taught us. Each correction was checked against OpenBao 2.6.5 on a scratch dev server. Corrections to the earlier draft:
+> - **The root is offline.** The draft generated it inside OpenBao (`pki_root`) and then "disabled the mount until rotation time". **`bao secrets disable` deletes the mount's data, keys included**, so that would have destroyed the root key. Disabling never "parks" a CA. The root is now made outside OpenBao by a ceremony script (0.7b), following [OpenBao's PKI considerations](https://openbao.org/docs/secrets/pki/considerations/).
+> - **ECDSA, not Ed25519** (below).
+> - **The listener certificate gets its own role.** The draft asked `internal-services` (`max_ttl=24h`) for `ttl=720h`. OpenBao doesn't reject that; it silently caps the TTL at `max_ttl`, so the cluster would have served a 24-hour certificate that nobody renewed.
+> - **No key material in `/tmp`, in `scp` or in workstation files.** No root token on the command line, and no administration over plain HTTP to `192.168.40.20`.
+> - **One rolling restart, not two.** `leader_ca_cert_file` points at the CA chain, not the server bundle.
+> - **Localhost operations move to `https://127.0.0.1:8200`**, so the certificate carries `127.0.0.1` and `localhost`.
+> - **AIA/CRL URLs use the cluster name**, not one node over HTTP.
+> - **No `tls_auto_reload`.** OpenBao 2.6.5 warns `unknown or unsupported field tls_auto_reload` and ignores it, and the listener keeps serving the old certificate after the file changes. **SIGHUP (`systemctl reload openbao`) reloads it** without a restart or reseal. Renewal (0.7e) relies on that.
 
-#### 0.7a — Enable and configure the root PKI
+**Decisions (HOMELAB-51, HOMELAB-52):**
+
+- **Offline root, OpenBao intermediate.** The root key is generated once on the workstation, signs the intermediate, and then lives only encrypted: in `pass` and in the safe. The intermediate key is generated inside OpenBao and never leaves it. Day-to-day issuance uses only the intermediate.
+- **ECDSA P-384 root; P-256 intermediate and leaves, in every role.** Not Ed25519: browser support for Ed25519 certificates is still unreliable, and later tiers serve web UIs with these certificates (OpenBao, Grafana, Keycloak). P-384 suits the one long-lived key; P-256 is fast, universally supported, and enough for certificates that live 24 hours to 5 years.
+- **`tls_min_version = "tls13"`.** Every planned client supports TLS 1.3: the Go stack (cert-manager, ESO, the OpenTofu provider, Alloy, `bao` itself) and Python (Ansible's `hashi_vault`). There is no legacy client to accommodate. Verified: `openssl s_client -tls1_2` gets `alert protocol version`. Revisit only for a client that genuinely can't do 1.3.
+- **Name constraints on the intermediate, DNS only.** Permitted names are `homelab.internal`, `cluster.local` and `localhost` (each covers its subdomains). IPs stay unconstrained so node, loopback, pod and Tailscale IP SANs keep validating. The constraints limit what a compromised intermediate could sign; Go and OpenSSL both reject a leaf outside them. OpenBao itself will still *issue* such a leaf, so the roles remain the first control.
+- **No revocation path for the intermediate.** Nothing hosts a CRL for an offline root, and Go clients don't check intermediate CRLs anyway. A compromised intermediate means a new root, distributed everywhere. The name constraints bound the damage until then.
+- **Automated listener renewal from day one** (0.7e): an OpenBao Agent per node, cert auth, and a reload on change.
+
+#### OpenBao administration in this phase
+
+All of it runs over SSH against the active node's localhost. The root token goes from `pass` to the node without being typed or shown, and it stays in the node's `~/.vault-token` only for the session:
 
 ```bash
-export VAULT_ADDR=http://192.168.40.20:8200
-bao login <root-token>
+N=192.168.40.2X   # the active node (bao status → HA Mode active)
+A=http://127.0.0.1:8200            # until 0.7d
+# A='https://127.0.0.1:8200 VAULT_CACERT=/etc/openbao/ca.pem'   # from 0.7d on; expands to both variables
 
-# Mount the root PKI with a 10-year max lease
-bao secrets enable -path=pki_root pki
-bao secrets tune -max-lease-ttl=87600h pki_root
-
-# Generate the self-signed root certificate (returns the public cert; private key never leaves Vault)
-bao write -field=certificate pki_root/root/generate/internal \
-  common_name="Homelab Root CA" \
-  ttl=87600h \
-  key_type=ed25519 \
-  > ~/homelab-root-ca.crt
-
-# Configure URLs (where consumers fetch the cert and check revocation)
-bao write pki_root/config/urls \
-  issuing_certificates="http://192.168.40.20:8200/v1/pki_root/ca" \
-  crl_distribution_points="http://192.168.40.20:8200/v1/pki_root/crl"
+# Root token from pass straight into the node's token helper; it's never on screen or in argv
+pass show homelab/vault/recovery-keys | jq -r .root_token | ssh dalton@$N "VAULT_ADDR=$A bao login -no-print -"
+ssh -t dalton@$N "export VAULT_ADDR=$A; exec bash"     # interactive admin shell for the blocks below
+ssh dalton@$N 'rm -f ~/.vault-token'                   # when done
 ```
 
-#### 0.7b — Enable and configure the intermediate PKI
+`bao login -no-print -` reads the token from stdin and doesn't display it (verified on 2.6.5). Only public material crosses to the workstation: CSRs and certificates. Private keys are generated where they're used (the root on the workstation, the intermediate and listener keys on the nodes) and never travel.
+
+#### 0.7a — Reconcile this phase (HOMELAB-52)
+
+This section. Phase 0.7 had to be fixed before anything ran, as HOMELAB-31 and HOMELAB-44 did for 0.5 and 0.6.
+
+#### 0.7b — Offline root CA ceremony (HOMELAB-53)
+
+`pki/root-ca.sh` in homelab-infra (README, "Offline root CA") does the whole ceremony on the workstation. It needs no LAN. Run it in a plain terminal: no session recording, no AI-assisted shell.
 
 ```bash
-# Mount the intermediate at a separate path
+cd ~/build/homelab-infra
+pki/root-ca.sh create          # P-384 key → pass homelab/pki/root-ca-key; root → pki/homelab-root-ca.crt
+pki/root-ca.sh backup > /Volumes/<usb>/homelab-root-ca-key.pem   # passphrase-encrypted PKCS#8 for the safe
+pki/root-ca.sh check /Volumes/<usb>/homelab-root-ca-key.pem      # proves the pass entry and the safe copy match the root
+```
+
+- **The root:** `CN=Homelab Root CA`, 10 years, `basicConstraints=critical,CA:TRUE,pathlen:1`, `keyUsage=critical,keyCertSign,cRLSign`, SKI/AKI, a random serial, and no AIA or CRL distribution point.
+- **The key is never unencrypted on disk.** It's held in a shell variable, stored into `pass`, and fed to `openssl` through a pipe. `create` smoke-tests `pass` first and refuses to overwrite an existing entry or certificate.
+- **Custody: two copies.** (1) `pass` → `homelab/pki/root-ca-key`. (2) The safe: AES-256 PKCS#8 under a passphrase kept apart from it, on an encrypted USB stick or printed. The owner confirms both with `check`.
+- **The certificate is public:** commit `pki/homelab-root-ca.crt`, and record its SHA-256 fingerprint, subject and validity on HOMELAB-53.
+
+#### 0.7c — Intermediate CA and issuance roles (HOMELAB-54)
+
+**Mount and CSR.** The key stays in OpenBao; `generate/internal` never returns it.
+
+```bash
+# On the node (admin shell)
 bao secrets enable -path=pki_int pki
-bao secrets tune -max-lease-ttl=43800h pki_int   # 5 years max
-
-# Generate a CSR — private key stays in Vault
-bao write -format=json pki_int/intermediate/generate/internal \
-  common_name="Homelab Intermediate CA" \
-  key_type=ed25519 \
-  | jq -r '.data.csr' > ~/pki_int.csr
-
-# Sign the CSR using the root
-bao write -format=json pki_root/root/sign-intermediate \
-  csr=@~/pki_int.csr \
-  format=pem_bundle \
-  ttl=43800h \
-  | jq -r '.data.certificate' > ~/pki_int.cert.pem
-
-# Import the signed cert back into the intermediate mount
-bao write pki_int/intermediate/set-signed certificate=@~/pki_int.cert.pem
-
-# Configure URLs for the intermediate
-bao write pki_int/config/urls \
-  issuing_certificates="http://192.168.40.20:8200/v1/pki_int/ca" \
-  crl_distribution_points="http://192.168.40.20:8200/v1/pki_int/crl"
+bao secrets tune -max-lease-ttl=43800h pki_int        # 5 years, the intermediate's lifetime
 ```
 
-#### 0.7c — Create issuance roles
+```bash
+# Workstation: the CSR is public; sign it with the root (the 0.7b script prompts first)
+ssh dalton@$N "VAULT_ADDR=$A bao write -field=csr pki_int/intermediate/generate/internal \
+  common_name='Homelab Intermediate CA' key_type=ec key_bits=256 key_name=homelab-intermediate-2026" > pki_int.csr
+pki/root-ca.sh sign pki_int.csr > pki/homelab-intermediate-2026.crt
 
-These define what certs the intermediate is allowed to sign. We start with one role for internal services; add more later as needs emerge.
+# Import intermediate + root as the chain
+cat pki/homelab-intermediate-2026.crt pki/homelab-root-ca.crt \
+  | ssh dalton@$N "VAULT_ADDR=$A bao write pki_int/intermediate/set-signed certificate=-"
+```
+
+`sign` signs for 5 years with `pathlen:0` and the name constraints above, and prints the certificate's metadata for the ticket. Commit `pki/homelab-intermediate-2026.crt` (public). Ansible builds `/etc/openbao/ca.pem` from the two committed files in 0.7d. Delete `pki_int.csr`.
+
+**Issuers.** `set-signed` imports two issuers: the intermediate (with its key, which becomes the default) and the root (certificate only). Name both and pin the default:
 
 ```bash
-bao write pki_int/roles/internal-services \
+# On the node
+bao list -detailed pki_int/issuers                       # note both IDs
+bao write pki_int/issuer/<intermediate-id> issuer_name=homelab-intermediate-2026
+bao write pki_int/issuer/<root-id>         issuer_name=homelab-root
+bao write pki_int/config/issuers default=homelab-intermediate-2026
+```
+
+**AIA, CRL and OCSP URLs on the cluster name, templated per issuer.** These URLs don't resolve until Tier 2 adds the `vault.homelab.internal` static mapping to VyOS. That's harmless: every consumer is given the full chain, and few clients fetch AIA or CRLs.
+
+```bash
+bao write pki_int/config/cluster \
+  path=https://vault.homelab.internal:8200/v1/pki_int \
+  aia_path=https://vault.homelab.internal:8200/v1/pki_int
+bao write pki_int/config/urls enable_templating=true \
+  issuing_certificates='{{cluster_aia_path}}/issuer/{{issuer_id}}/der' \
+  crl_distribution_points='{{cluster_aia_path}}/issuer/{{issuer_id}}/crl/der' \
+  ocsp_servers='{{cluster_path}}/ocsp'
+```
+
+**Auto-tidy** clears expired certificates and revoked entries:
+
+```bash
+bao write pki_int/config/auto-tidy enabled=true interval_duration=12h safety_buffer=72h \
+  tidy_cert_store=true tidy_revoked_certs=true tidy_revoked_cert_issuer_associations=true tidy_expired_issuers=true
+```
+
+**Role `internal-services`:** service certificates for Tier 2+, issued by cert-manager.
+
+```bash
+bao write pki_int/roles/internal-services issuer_ref=default \
+  key_type=ec key_bits=256 key_usage=DigitalSignature \
   allowed_domains="homelab.internal,svc.cluster.local,homelab-prod.homelab.internal,homelab-dev.homelab.internal,mgmt.homelab.internal" \
-  allow_subdomains=true \
-  allow_glob_domains=true \
-  max_ttl="24h" \
-  ttl="24h" \
-  key_type="ed25519" \
-  require_cn=false
+  allow_subdomains=true require_cn=false \
+  ttl=24h max_ttl=24h no_store=true
 ```
 
-> **Short-lived certs by design:** 24-hour TTL means even a compromised cert is useless within a day. cert-manager will renew well before expiry (typically at 2/3 of lifetime). This is *the* defense-industry pattern for service identity and the v3 → v4 upgrade that produces the strongest interview talking point: "I run a two-tier internal PKI with 24-hour leaf certificates rotated by cert-manager."
+- **`no_store=true`:** OpenBao recommends it for TTLs under 30 days. Certificates aren't written to storage, so they can't be listed or revoked by serial; at 24 hours, expiry is the revocation.
+- **Least privilege comes in Tier 2.** `homelab.internal` with subdomains also covers `vault.homelab.internal`, so this role could mint a certificate that impersonates OpenBao. When cert-manager arrives, split it per consumer (for example, per cluster domain) and exclude `vault*.homelab.internal`.
+- **Use full Kubernetes names.** Bare names like `svc-name.ns.svc` fall outside both the role and the intermediate's name constraints; use `*.svc.cluster.local`.
 
-#### 0.7d — Rotate Vault's own listener to TLS (using its own PKI)
-
-Vault has been running with `tls_disable = 1` since Phase 0.5. Now that PKI exists, generate a cert for Vault and switch to TLS.
-
-> **Undo the Phase 0.5 bootstrap settings *(2026-10-29 — HOMELAB-31)*:** in the Ansible `openbao.hcl` template, set `api_addr` and every `retry_join` to `https://` (below) and remove `tls_disable`. Re-add VLANs 50 and 60 to `vault_baseline_api_sources`. The package's unused self-signed pair in `/opt/openbao/tls` (`CN=OpenBao`, no SANs) can then be deleted. `cluster_addr` needs no change; its scheme was always ignored. Make these changes in Ansible, not by hand on the nodes.
+**Role `openbao-listener`:** only the cluster's own names, and its own TTL.
 
 ```bash
-# Issue a cert for the Vault cluster (covers all three nodes via SANs)
-bao write -format=json pki_int/issue/internal-services \
-  common_name="vault.homelab.internal" \
-  alt_names="vault-01.homelab.internal,vault-02.homelab.internal,vault-03.homelab.internal" \
-  ip_sans="192.168.40.20,192.168.40.21,192.168.40.22" \
-  ttl="720h" \
-  > ~/vault-tls.json
-# Note: 30-day TTL here because Vault hasn't bootstrapped its own cert-manager rotation yet.
-# Plan to rotate manually until cert-manager exists; then automate via a Tier 2 cronjob.
-
-jq -r '.data.certificate' ~/vault-tls.json > /tmp/vault.crt
-jq -r '.data.private_key' ~/vault-tls.json > /tmp/vault.key
-jq -r '.data.issuing_ca' ~/vault-tls.json > /tmp/vault-ca.crt
-cat /tmp/vault.crt /tmp/vault-ca.crt > /tmp/vault-bundle.crt
+bao write pki_int/roles/openbao-listener issuer_ref=default \
+  key_type=ec key_bits=256 key_usage=DigitalSignature server_flag=true client_flag=true \
+  allowed_domains="vault.homelab.internal,vault-01.homelab.internal,vault-02.homelab.internal,vault-03.homelab.internal,localhost" \
+  allow_bare_domains=true allow_subdomains=false allow_glob_domains=false allow_wildcard_certificates=false allow_localhost=true \
+  allow_ip_sans=true allowed_ip_sans_cidr="127.0.0.1/32,192.168.40.20/32,192.168.40.21/32,192.168.40.22/32" \
+  ttl=720h max_ttl=720h
 ```
 
-Distribute to all three Vault VMs and update config:
+- **30 days, renewed at about two-thirds** by the agent (0.7e), so a stopped agent leaves about 10 days of headroom.
+- **The client flag is deliberate:** the same certificate is the node's cert-auth identity for renewal.
+- **Stored, not `no_store`,** so a listener certificate can be revoked by serial.
+- Anything else is refused: `common name evil.homelab.internal not allowed by this role`, `the IP address "192.168.40.99" is not allowed in this role`.
+
+**Test both roles and inspect the results** (key P-256; SANs and TTLs as specified; chain validates to the root; a `no_store` serial isn't readable at `pki_int/cert/<serial>`):
 
 ```bash
-# Distribute (repeat for each Vault VM)
-for HOST in 192.168.40.20 192.168.40.21 192.168.40.22; do
-  scp /tmp/vault-bundle.crt /tmp/vault.key dalton@${HOST}:/tmp/
-  ssh dalton@${HOST} '
-    sudo install -o openbao -g openbao -m 0444 /tmp/vault-bundle.crt /etc/openbao/vault.crt &&
-    sudo install -o openbao -g openbao -m 0400 /tmp/vault.key /etc/openbao/vault.key &&
-    rm /tmp/vault-bundle.crt /tmp/vault.key
-  '
-done
-
-# Securely clean workstation tempfiles
-shred -u /tmp/vault.crt /tmp/vault.key /tmp/vault-ca.crt /tmp/vault-bundle.crt ~/vault-tls.json
+# Workstation: only the certificate field crosses; the test key is discarded with the response
+test_issue() {   # <role> <bao write arguments>
+  ssh dalton@$N "VAULT_ADDR=$A bao write -field=certificate pki_int/issue/$*" \
+    | tee >(openssl x509 -noout -subject -ext subjectAltName -enddate >&2) \
+    | openssl verify -CAfile pki/homelab-root-ca.crt -untrusted pki/homelab-intermediate-2026.crt
+}
+test_issue internal-services common_name=test.homelab.internal
+test_issue openbao-listener common_name=vault-01.homelab.internal alt_names=localhost ip_sans=127.0.0.1
 ```
 
-Update `/etc/openbao/openbao.hcl` on each node — change the listener block:
+Record the issuer IDs, subjects, validity, fingerprints and role settings on HOMELAB-54; all of it is non-secret.
+
+#### 0.7d — Cut the API over to TLS (HOMELAB-55)
+
+**Bootstrap certificates.** Each node's first listener certificate is issued **on that node** by a checked-in script, over SSH to localhost, with the root token logged in as above. The key never leaves the node. It writes cert + chain + key as one file, `/etc/openbao/tls/listener.pem` (`openbao:openbao 0400`), via a temporary file in the same directory and a rename. The server reads both halves from that one file (`tls_cert_file` and `tls_key_file` both point at it; verified on 2.6.5), so the pair can never be out of step. The script output shows only metadata: subject, SANs, serial, expiry.
+
+**Ansible (`vault_baseline`) changes, all at once:**
+
+- **Trust:** the root at `/usr/local/share/ca-certificates/homelab-root-ca.crt`, then `update-ca-certificates`, giving `/etc/ssl/certs/homelab-root-ca.crt`, the path later tiers use. The chain (intermediate + root) at `/etc/openbao/ca.pem` (`0444`). Both come from the committed files in `pki/`.
+- **Listener and addresses:**
 
 ```hcl
+api_addr = "https://192.168.40.20:8200"          # per node
+
 listener "tcp" {
-  address          = "0.0.0.0:8200"
-  cluster_address  = "0.0.0.0:8201"
-  tls_cert_file    = "/etc/openbao/vault.crt"
-  tls_key_file     = "/etc/openbao/vault.key"
-  tls_min_version  = "tls13"
+  address         = "0.0.0.0:8200"
+  cluster_address = "0.0.0.0:8201"
+  tls_cert_file   = "/etc/openbao/tls/listener.pem"   # leaf + intermediate + root, then the key
+  tls_key_file    = "/etc/openbao/tls/listener.pem"
+  tls_min_version = "tls13"
 }
-```
 
-Restart Vault on each node, one at a time (rolling, so the cluster stays available):
-
-```bash
-sudo systemctl restart openbao
-# Wait for auto-unseal and rejoin, verify with: bao status (should show unsealed, HA active)
-# Then move to next node
-```
-
-Update `api_addr` and `cluster_addr` in each node's config from `http://` to `https://`. **Also update all three `retry_join` blocks** — they still point at `http://` from Phase 0.5a and will fail to rejoin after any restart once TLS is on *(v5.1 fix)*:
-
-```hcl
 storage "raft" {
-  path    = "/opt/openbao/data"
-  node_id = "vault-01"
-
+  # ...
   retry_join {
-    leader_api_addr         = "https://192.168.40.20:8200"
-    leader_ca_cert_file     = "/etc/openbao/vault.crt"   # bundle includes the intermediate
+    leader_api_addr     = "https://192.168.40.20:8200"
+    leader_ca_cert_file = "/etc/openbao/ca.pem"       # the CA chain, not the server bundle
   }
-  retry_join {
-    leader_api_addr         = "https://192.168.40.21:8200"
-    leader_ca_cert_file     = "/etc/openbao/vault.crt"
-  }
-  retry_join {
-    leader_api_addr         = "https://192.168.40.22:8200"
-    leader_ca_cert_file     = "/etc/openbao/vault.crt"
-  }
+  # same for .21 and .22
 }
 ```
 
-One more rolling restart applies the change.
+- **Firewall:** move VLANs 50/60 from `vault_baseline_api_sources_revoked` back into `vault_baseline_api_sources`.
+- **Cleanup:** remove the package's unused `/opt/openbao/tls` pair.
+- **Localhost:** put `VAULT_ADDR=https://127.0.0.1:8200` and `VAULT_CACERT=/etc/openbao/ca.pem` in the nodes' environment. `/etc/profile.d` covers interactive shells; `/etc/environment` (pam_env) also covers `ssh host 'bao …'`. Until that's verified, spell both out in one-liners.
 
-From your workstation:
+**Rollout: one restart per node, auto-unseal makes each one hands-off.**
+
+1. `--check`.
+2. Each standby, one at a time: apply, restart, confirm it's unsealed, rejoined, and serving TLS before the next.
+3. Step down the active node.
+4. Apply to the old active node and restart it.
+5. Re-open the firewall last, once all three serve TLS.
+
+Then a repeat `--check` must show `changed=0`.
+
+Update the unseal-recovery runbook and the README for HTTPS localhost. The KMS pre-flight's throwaway server keeps its own loopback HTTP listener.
+
+**Workstation:** point `VAULT_CACERT` at the committed root (homelab-infra `mise.toml` `[env]`: `VAULT_CACERT = "{{config_root}}/pki/homelab-root-ca.crt"`). Optionally add it to the macOS keychain so browsers trust the UI.
 
 ```bash
-export VAULT_ADDR=https://192.168.40.20:8200
-export VAULT_CACERT=~/homelab-root-ca.crt   # the file from Phase 0.7a
-bao status
-# Should connect over TLS, show all three nodes healthy
+for H in 192.168.40.20 192.168.40.21 192.168.40.22; do
+  curl -sS --cacert pki/homelab-root-ca.crt -o /dev/null -w "$H %{http_code}\n" https://$H:8200/v1/sys/health
+done   # 200 from the active node, 429 from standbys: both mean TLS validated
 ```
 
-#### Verification
+`vault-verify.yaml` checks the handshake against the CA, the certificate SANs, days to expiry, the trust store and the firewall rule set.
 
-- [ ] `curl --cacert ~/homelab-root-ca.crt https://192.168.40.20:8200/v1/sys/health` returns 200 OK
-- [ ] `bao read pki_int/cert/ca` returns the intermediate cert chain
-- [ ] Test issuance: `bao write pki_int/issue/internal-services common_name=test.homelab.internal ttl=1h` returns a valid cert
-- [ ] Distribute `~/homelab-root-ca.crt` to your workstation's trust store and `~/.config/vault/ca.crt` — future commands can drop the `--cacert` flag
-- [ ] Back up the root CA cert file to `pass` under `homelab/vault/root-ca-cert`
+#### 0.7e — Automated listener renewal (HOMELAB-56)
+
+**Design:**
+
+- **The agent.** Each node runs `bao agent` (shipped in the openbao package) as `openbao-agent.service`, user `openbao`, hardened like the server unit.
+- **Login.** The agent logs in with **cert auth**, using the node's current listener certificate (it has the client flag), so there's no static secret. The cert-auth role trusts the `pki_int` issuer and allows only `vault-0[1-3].homelab.internal`. It issues a short-TTL token with one policy, `openbao-listener-renew`: `create`/`update` on `pki_int/issue/openbao-listener` and nothing else. A checked-in, idempotent script applies the auth mount, role and policy with the root token.
+- **Renewal.** A `pkiCert` template renews at about two-thirds of the TTL. It writes the combined `listener.pem` atomically (render to a temporary file, then rename).
+- **Reload.** Because 2.6.5 has no `tls_auto_reload`, the server must be told. The cleanest path keeps the agent unprivileged: a root-owned systemd `openbao-tls.path` unit watches `listener.pem` and triggers `systemctl reload openbao` (SIGHUP: no restart, no reseal; the same reload logrotate already uses). Verified on 2.6.5: after SIGHUP the listener serves the new serial. 0.7e must prove the path unit fires on the agent's rename and that one reload per renewal is all it triggers.
+
+**Failure modes (runbook):**
+
+| Failure | Effect | Action |
+|---|---|---|
+| Agent stopped or crashing | The current certificate runs to expiry: about 10 days of headroom from the two-thirds point | `vault-verify.yaml` alerts below 7 days; fix and restart the agent |
+| OpenBao sealed or unreachable | The agent retries | Fix the cluster; renewal resumes |
+| Certificate expired | **The agent can't log in:** its identity is the expired certificate | Re-run the 0.7d bootstrap script on that node (root token from `pass`), then restart the agent |
+| Reload unit missing or failed | A new file on disk, the old certificate served | `vault-verify.yaml` compares the served serial with the file serial; `systemctl reload openbao` |
+
+**Proof:** with a temporarily short TTL (for example 10m), observe at least one automatic renewal per node. The listener serves the new serial with no restart, and OpenBao and clients are unaffected. Then restore 30 days.
+
+#### Where the trust anchors live
+
+| Copy | Location | Installed by |
+|---|---|---|
+| Root certificate (source of truth) | homelab-infra `pki/homelab-root-ca.crt` | committed in 0.7b |
+| Intermediate certificate | homelab-infra `pki/homelab-intermediate-2026.crt` | committed in 0.7c |
+| Root key | `pass` `homelab/pki/root-ca-key` + encrypted copy in the safe | 0.7b ceremony; never on a node |
+| Vault nodes: system trust | `/etc/ssl/certs/homelab-root-ca.crt` | `vault_baseline` (0.7d) |
+| Vault nodes: chain for OpenBao and `bao` | `/etc/openbao/ca.pem` | `vault_baseline` (0.7d) |
+| Workstation | `VAULT_CACERT` → the repo file; optionally the keychain | 0.7d |
+| Tier 1+ VMs | `/etc/ssl/certs/homelab-root-ca.crt` | Tier 1 Ansible, from the repo file |
+| Kubernetes | `homelab-root-ca` ConfigMap / `caBundle` | Tier 2, from the repo file |
+
+The root certificate is public and needs no `pass` entry. OpenBao has no `pki_root` mount; consumers read the root from the repo, or from `pki_int/issuer/homelab-root`.
+
+#### Verification (HOMELAB-57)
+
+- [ ] `pki/root-ca.sh check <safe copy>`: the root, the `pass` entry and the safe copy agree; the fingerprint matches HOMELAB-53
+- [ ] `curl --cacert pki/homelab-root-ca.crt https://192.168.40.2X:8200/v1/sys/health` validates on all three nodes; `openssl s_client -tls1_2` is refused
+- [ ] `bao read pki_int/issuer/default` is `homelab-intermediate-2026`, P-256, chaining to the root, with the name constraints
+- [ ] Test issuance from both roles, as in 0.7c; the listener role refuses names and IPs outside its list
+- [ ] Each node's agent has renewed at least once (served serial = file serial, no restart); `vault-verify.yaml` passes with ≥ 7 days of headroom
+- [ ] Cold restart (all three off, then on) and leader failover still work under TLS; `retry_join` reconnects over HTTPS
+- [ ] The API reaches VLANs 50/60 again; the package's `/opt/openbao/tls` pair is gone
+- [ ] Handoff notes for 0.8
 
 ---
 
@@ -1083,7 +1166,6 @@ bao write -force -field=secret_id auth/approle/role/ansible/secret-id   > ~/ansi
   pass insert -m homelab/vault/ansible-role-id       < ~/ansible-role-id.txt
   pass insert -m homelab/vault/ansible-secret-id     < ~/ansible-secret-id.txt
   pass insert -m homelab/vault/recovery-keys         # paste recovery keys 1-5 from Phase 0.6f
-  pass insert -m homelab/vault/root-ca-cert          < ~/homelab-root-ca.crt
   pass git push
   ```
 - [ ] Securely wipe the workstation copies:
@@ -1121,11 +1203,11 @@ You may not advance to Tier 1 until **every** item below passes.
 - [ ] `bao operator raft list-peers` shows three voters
 - [ ] Cold-restart test passes (power off all three, power on, all auto-unseal without intervention)
 - [ ] Raft leader-loss test passes (stop leader, new leader elected within ~5s, old leader rejoins as follower on restart)
-- [ ] Vault listener is on TLS with cert issued by Vault's own intermediate CA (`https://`, not `http://`)
+- [ ] Vault listener is on TLS 1.3 with a cert issued by `pki_int` (`https://`, not `http://`), renewed by the OpenBao Agent; `vault-verify.yaml` shows ≥ 7 days of headroom
 
 #### Engines configured
 
-- [ ] PKI: `bao list pki_int/roles` shows `internal-services`
+- [ ] PKI: `bao list pki_int/roles` shows `internal-services` and `openbao-listener`; the default issuer chains to the offline root in homelab-infra `pki/`; no `pki_root` mount exists
 - [ ] Transit: `bao list transit/keys` shows `cosign-harbor` and `app-data-encryption`
 - [ ] SSH: `bao read ssh/roles/otp-baremetal` returns the role
 - [ ] Database: engine is enabled (no connections yet — expected)
@@ -1136,7 +1218,7 @@ You may not advance to Tier 1 until **every** item below passes.
 
 - [ ] AppRole login for `terraform` succeeds and returns a token with only `terraform-provisioner` policy
 - [ ] AppRole login for `ansible` succeeds and returns a token with only `ansible-orchestrator` policy
-- [ ] Both `role_id`s and `secret_id`s stored in `pass`, paper recovery keys in physical safe, root CA cert in `pass`
+- [ ] Both `role_id`s and `secret_id`s stored in `pass`, paper recovery keys in physical safe, root CA key in `pass` and its encrypted copy in the safe (`pki/root-ca.sh check`)
 
 #### Hygiene
 

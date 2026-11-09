@@ -395,11 +395,11 @@ spec:
             namespace: "external-secrets"
 ```
 
-The `homelab-root-ca` ConfigMap holds the Vault root CA cert from Tier 0. Pre-populate it on each cluster:
+The `homelab-root-ca` ConfigMap holds the homelab root CA certificate from Tier 0 (homelab-infra `pki/homelab-root-ca.crt`, Phase 0.7b; it's public). Pre-populate it on each cluster:
 
 ```bash
 kubectl --context homelab-prod -n external-secrets create configmap homelab-root-ca \
-  --from-file=ca.crt=<(pass show homelab/vault/root-ca-cert)
+  --from-file=ca.crt=pki/homelab-root-ca.crt   # from the homelab-infra checkout
 ```
 
 > **Why ClusterSecretStore not SecretStore:** Cluster-scoped resource means any namespace can reference it via ExternalSecret. Avoids per-namespace duplication. Acceptable because the policies are scoped *inside Vault* by path; ESO can only read what its policy allows regardless of which namespace asks.
@@ -493,7 +493,7 @@ spec:
           name: cert-manager
 ```
 
-The `caBundle` is the base64-encoded contents of `~/homelab-root-ca.crt` (from Tier 0). Same on every cluster.
+The `caBundle` is the base64-encoded contents of homelab-infra `pki/homelab-root-ca.crt` (Phase 0.7b). Same on every cluster.
 
 #### 2.4c — Let's Encrypt ClusterIssuer (public services via Cloudflare DNS-01)
 

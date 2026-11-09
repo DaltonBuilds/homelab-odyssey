@@ -680,7 +680,7 @@ The role's tasks (applied to every host):
    tls_skip_verify = false
    allowed_roles   = "otp-baremetal"
    ```
-3. Distribute the homelab root CA cert to `/etc/ssl/certs/homelab-root-ca.crt` (read from Vault via the `pki_root/cert/ca` endpoint)
+3. Distribute the homelab root CA cert to `/etc/ssl/certs/homelab-root-ca.crt` from homelab-infra `pki/homelab-root-ca.crt` (Phase 0.7b; the root is offline, so OpenBao has no `pki_root` mount)
 4. Configure PAM to consult `vault-ssh-helper`:
    ```
    # /etc/pam.d/sshd  — add at the top of "auth" block
@@ -1283,7 +1283,7 @@ Snapshot script + systemd timer (Ansible role `roles/openbao-snapshot`, applied 
 #!/usr/bin/env bash
 # /usr/local/bin/openbao-snapshot.sh — every 6h via systemd timer, offset from the etcd window
 set -euo pipefail
-export VAULT_ADDR=https://127.0.0.1:8200
+export VAULT_ADDR=https://127.0.0.1:8200 VAULT_CACERT=/etc/openbao/ca.pem   # Phase 0.7d
 
 # Followers exit quietly; sys/leader is unauthenticated
 [ "$(bao read -field=is_self sys/leader)" = "true" ] || exit 0

@@ -106,11 +106,13 @@ Tracker mapping: baseline [HOMELAB-36](https://daltonbuilds.youtrack.cloud/issue
 - Story: Shamir shares relabelled as recovery keys; KMS-loss risk recorded; runbook per failure (HOMELAB-49).
 - Story (verify): cold-restart all three → auto-unseal, no human; `Seal Type gcpckms`, `Recovery Seal Type shamir`; failover under the new seal (HOMELAB-50).
 
-**Epic [0.7] PKI engine — root + intermediate CA** — `openbao`, `security`
-- Story: Mount root PKI (10y), generate self-signed root, set issuing/CRL URLs.
-- Story: Mount intermediate, CSR → sign with root → import; set URLs; define `internal-services` role + allowed domains.
-- Story: Issue the OpenBao cluster's own TLS cert (SAN-covered); distribute; roll each node; undo the 0.5 bootstrap settings (`https://` api_addr/retry_join, re-widen API firewall).
-- Story (verify): test issuance for `test.homelab.internal` returns a valid cert; cluster listener on Vault-signed TLS.
+**Epic [0.7] Internal PKI — offline root, OpenBao intermediate, TLS listener** — `openbao`, `security` (HOMELAB-51)
+- Task: Reconcile the guide's PKI and TLS steps: offline root (`secrets disable` deletes a mount's keys), ECDSA P-384/P-256, a separate `openbao-listener` role, localhost-only admin, `tls13`, DNS name constraints, one rolling restart; `tls_auto_reload` doesn't exist in 2.6.5, so renewal reloads with SIGHUP (HOMELAB-52).
+- Story: Offline root ceremony with `pki/root-ca.sh` in homelab-infra: P-384 key into `pass` + an encrypted copy in the safe, the public root committed (HOMELAB-53).
+- Story: `pki_int`: P-256 intermediate generated in OpenBao, signed by the root; named default issuer; templated AIA/CRL/OCSP on `vault.homelab.internal`; auto-tidy; roles `internal-services` (24h, `no_store`) and `openbao-listener` (exact names, 30d) (HOMELAB-54).
+- Story: TLS cutover: per-node bootstrap certificates issued on the node; trust store + `/etc/openbao/ca.pem`; `https://` `api_addr`/`retry_join`; firewall re-widened; one restart per node (HOMELAB-55).
+- Story: OpenBao Agent per node renews its listener certificate with cert auth; a systemd path unit reloads OpenBao; one observed renewal per node (HOMELAB-56).
+- Story (verify): TLS validated on all three nodes, test issuance from both roles, renewal headroom, cold restart and failover under TLS (HOMELAB-57).
 
 **Epic [0.8] Transit engine (encryption as a service)** — `openbao`
 - Story: Create `cosign-harbor` + `app-data-encryption` keys; encrypt/decrypt smoke test.
