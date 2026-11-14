@@ -813,6 +813,8 @@ pki/root-ca.sh check /Volumes/<usb>/homelab-root-ca-key.pem      # proves the pa
 
 #### 0.7c — Intermediate CA and issuance roles (HOMELAB-54)
 
+**Run it with `pki/openbao-pki.sh apply`** in homelab-infra. Every step below is in that script, in this order. The script logs in as above, finds the active node itself, can be re-run safely, and ends with `check` (test issuance from both roles, refusals, chain, `no_store`). The commands are shown here so each step is understood. Typing them by hand is the fallback.
+
 **Mount and CSR.** The key stays in OpenBao; `generate/internal` never returns it.
 
 ```bash
