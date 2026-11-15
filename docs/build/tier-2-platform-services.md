@@ -1007,7 +1007,7 @@ mirrors:
 configs:
   "harbor.homelab-prod.homelab.internal":
     tls:
-      ca_file: /etc/ssl/certs/homelab-root-ca.crt
+      ca_file: /etc/ssl/certs/homelab-root-ca.pem
     # No credentials needed for public read on proxy projects
     # Auth required only for pushing — that's a CI concern, not a node concern
 ```

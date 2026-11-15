@@ -373,7 +373,7 @@ spec:
             endpoint {
               url = "https://loki.mgmt.homelab.internal/loki/api/v1/push"
               tls_config {
-                ca_file = "/etc/ssl/certs/homelab-root-ca.crt"
+                ca_file = "/etc/ssl/certs/homelab-root-ca.pem"
               }
             }
           }
@@ -405,7 +405,7 @@ spec:
             endpoint {
               url = "https://prometheus.mgmt.homelab.internal/api/v1/write"
               tls_config {
-                ca_file = "/etc/ssl/certs/homelab-root-ca.crt"
+                ca_file = "/etc/ssl/certs/homelab-root-ca.pem"
               }
             }
             external_labels = {
@@ -495,7 +495,7 @@ loki.write "mgmt" {
   endpoint {
     url = "https://loki.mgmt.homelab.internal/loki/api/v1/push"
     tls_config {
-      ca_file = "/etc/ssl/certs/homelab-root-ca.crt"
+      ca_file = "/etc/ssl/certs/homelab-root-ca.pem"
     }
   }
   // WAL on disk: don't lose logs if mgmt-plane is briefly unreachable
@@ -634,7 +634,7 @@ spec:
               hostport: https://loki.mgmt.homelab.internal
               tenant: homelab-prod
               tls:
-                cafile: /etc/ssl/certs/homelab-root-ca.crt
+                cafile: /etc/ssl/certs/homelab-root-ca.pem
         falcoctl:
           artifact:
             install:
@@ -894,7 +894,7 @@ loki.write "audit" {
     url       = "https://loki.mgmt.homelab.internal/loki/api/v1/push"
     tenant_id = "audit"
     tls_config {
-      ca_file = "/etc/ssl/certs/homelab-root-ca.crt"
+      ca_file = "/etc/ssl/certs/homelab-root-ca.pem"
     }
   }
   wal {
