@@ -34,8 +34,9 @@ The five Shamir shares from init are now **recovery keys** (`bao status`: `Recov
 ## First look: is it the seal?
 
 ```bash
-# on the node (before Phase 0.7d: VAULT_ADDR=http://127.0.0.1:8200, no VAULT_CACERT)
-VAULT_ADDR=https://127.0.0.1:8200 VAULT_CACERT=/etc/openbao/ca.pem bao status   # Sealed true + Seal Type gcpckms → the unseal path failed
+# on the node; /etc/environment sets VAULT_ADDR=https://127.0.0.1:8200 and VAULT_CACERT=/etc/openbao/ca.pem
+# (before Phase 0.7d: VAULT_ADDR=http://127.0.0.1:8200)
+bao status   # Sealed true + Seal Type gcpckms → the unseal path failed
 sudo journalctl -u openbao -b --no-pager | grep -iE 'seal|kms|oauth|google|permission|denied|unavailable'
 curl -s -o /dev/null -w '%{http_code}\n' https://cloudkms.googleapis.com/   # 404 = reachable; 000 = no egress
 chronyc tracking | grep 'System time'                                       # badly wrong clock breaks OAuth
