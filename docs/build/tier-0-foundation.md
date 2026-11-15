@@ -782,6 +782,7 @@ All of it runs over SSH against the active node's localhost. The root token goes
 N=192.168.40.2X   # the active node (bao status → HA Mode active)
 A=http://127.0.0.1:8200            # until 0.7d
 # A='https://127.0.0.1:8200 VAULT_CACERT=/etc/openbao/ca.pem'   # from 0.7d on; expands to both variables
+# (from 0.7d, /etc/environment sets both on the nodes, so VAULT_ADDR=$A is optional)
 
 # Root token from pass straight into the node's token helper; it's never on screen or in argv
 pass show homelab/vault/recovery-keys | jq -r .root_token | ssh dalton@$N "VAULT_ADDR=$A bao login -no-print -"
@@ -914,6 +915,8 @@ Record the issuer IDs, subjects, validity, fingerprints and role settings on HOM
 
 **Bootstrap certificates.** Each node's first listener certificate is issued **on that node** by a checked-in script, over SSH to localhost, with the root token logged in as above. The key never leaves the node. It writes cert + chain + key as one file, `/etc/openbao/tls/listener.pem` (`openbao:openbao 0400`), via a temporary file in the same directory and a rename. The server reads both halves from that one file (`tls_cert_file` and `tls_key_file` both point at it; verified on 2.6.5), so the pair can never be out of step. The script output shows only metadata: subject, SANs, serial, expiry.
 
+The script is `pki/openbao-pki.sh listener` in homelab-infra (README, "OpenBao TLS listener"). OpenBao's response, key included, goes through a pipe on the node: from `bao` to `jq` to a root shell. That shell checks that cert and key match before the rename, so a refused or partial issue never replaces the live file. Re-running it skips a node with more than 10 days left. On a node already serving the file it reloads OpenBao, which makes it the manual renewal until 0.7e. It also copes with an expired certificate: it then talks to the node's own loopback without verification, warns, and reissues.
+
 **Ansible (`vault_baseline`) changes, all at once:**
 
 - **Trust:** the root at `/usr/local/share/ca-certificates/homelab-root-ca.crt`, then `update-ca-certificates`, giving `/etc/ssl/certs/homelab-root-ca.crt`, the path later tiers use. The chain (intermediate + root) at `/etc/openbao/ca.pem` (`0444`). Both come from the committed files in `pki/`.
@@ -940,23 +943,29 @@ storage "raft" {
 }
 ```
 
-- **Firewall:** move VLANs 50/60 from `vault_baseline_api_sources_revoked` back into `vault_baseline_api_sources`.
+- **Firewall:** VLANs 50/60 are `vault_baseline_api_tls_sources`. The role opens them on a node only after that node answers over TLS, and removes them while it's plain HTTP. So "re-open last" happens per node, right after that node's TLS check, and a plaintext listener is never exposed.
 - **Cleanup:** remove the package's unused `/opt/openbao/tls` pair.
-- **Localhost:** put `VAULT_ADDR=https://127.0.0.1:8200` and `VAULT_CACERT=/etc/openbao/ca.pem` in the nodes' environment. `/etc/profile.d` covers interactive shells; `/etc/environment` (pam_env) also covers `ssh host 'bao …'`. Until that's verified, spell both out in one-liners.
+- **Localhost:** `VAULT_ADDR=https://127.0.0.1:8200` and `VAULT_CACERT=/etc/openbao/ca.pem` in `/etc/environment`, once the node serves TLS. pam_env reads it for every SSH session, interactive or not, and for `sudo`, so `/etc/profile.d` isn't needed and `ssh host 'bao …'` works with no flags.
 
-**Rollout: one restart per node, auto-unseal makes each one hands-off.**
+**Rollout: one restart per node, auto-unseal makes each one hands-off.** `-e vault_baseline_openbao_restart=true` lets the role restart a node whose running config is stale, once. It refuses the active node (via `sys/leader`). After the restart it waits for the node to unseal and rejoin as a standby, and verify checks TLS before the play moves on.
 
-1. `--check`.
-2. Each standby, one at a time: apply, restart, confirm it's unsealed, rejoined, and serving TLS before the next.
-3. Step down the active node.
-4. Apply to the old active node and restart it.
-5. Re-open the firewall last, once all three serve TLS.
+```bash
+cd ~/build/homelab-infra
+pki/openbao-pki.sh listener                 # 1. all three certificates; plain terminal
 
-Then a repeat `--check` must show `changed=0`.
+B="mise exec -- ansible-playbook ansible/playbooks/vault-baseline.yaml -e vault_baseline_openbao_tls=true"
+$B --check --diff --limit vault-03          # 2.
+$B -e vault_baseline_openbao_restart=true --diff --limit vault-03   # 3. standbys, one at a time
+$B -e vault_baseline_openbao_restart=true --diff --limit vault-02
+pki/openbao-pki.sh step-down                # 4. the active node hands over
+$B -e vault_baseline_openbao_restart=true --diff --limit vault-01   # 5. the old active node
+```
+
+Then set `vault_baseline_openbao_tls: true` in `group_vars/vault.yaml`. A repeat `--check` must show `changed=0`, and `vault-verify.yaml` must pass. Mixed HTTP and HTTPS nodes are fine between restarts: Raft and forwarding use 8201's own TLS, and joined nodes ignore `retry_join`.
 
 Update the unseal-recovery runbook and the README for HTTPS localhost. The KMS pre-flight's throwaway server keeps its own loopback HTTP listener.
 
-**Workstation:** point `VAULT_CACERT` at the committed root (homelab-infra `mise.toml` `[env]`: `VAULT_CACERT = "{{config_root}}/pki/homelab-root-ca.crt"`). Optionally add it to the macOS keychain so browsers trust the UI.
+**Workstation:** `VAULT_CACERT` points at the committed root (homelab-infra `mise.toml` `[env]`: `VAULT_CACERT = "{{config_root}}/pki/homelab-root-ca.crt"`). Optionally add it to the macOS keychain so browsers trust the UI.
 
 ```bash
 for H in 192.168.40.20 192.168.40.21 192.168.40.22; do
@@ -981,7 +990,7 @@ done   # 200 from the active node, 429 from standbys: both mean TLS validated
 |---|---|---|
 | Agent stopped or crashing | The current certificate runs to expiry: about 10 days of headroom from the two-thirds point | `vault-verify.yaml` alerts below 7 days; fix and restart the agent |
 | OpenBao sealed or unreachable | The agent retries | Fix the cluster; renewal resumes |
-| Certificate expired | **The agent can't log in:** its identity is the expired certificate | Re-run the 0.7d bootstrap script on that node (root token from `pass`), then restart the agent |
+| Certificate expired | **The agent can't log in:** its identity is the expired certificate | `pki/openbao-pki.sh listener <node>` (root token from `pass`; it handles the expired loopback), then restart the agent |
 | Reload unit missing or failed | A new file on disk, the old certificate served | `vault-verify.yaml` compares the served serial with the file serial; `systemctl reload openbao` |
 
 **Proof:** with a temporarily short TTL (for example 10m), observe at least one automatic renewal per node. The listener serves the new serial with no restart, and OpenBao and clients are unaffected. Then restore 30 days.
