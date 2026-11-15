@@ -676,11 +676,11 @@ The role's tasks (applied to every host):
    ```hcl
    vault_addr      = "https://192.168.40.20:8200"
    ssh_mount_point = "ssh"
-   ca_cert         = "/etc/ssl/certs/homelab-root-ca.crt"
+   ca_cert         = "/etc/ssl/certs/homelab-root-ca.pem"
    tls_skip_verify = false
    allowed_roles   = "otp-baremetal"
    ```
-3. Distribute the homelab root CA cert to `/etc/ssl/certs/homelab-root-ca.crt` from homelab-infra `pki/homelab-root-ca.crt` (Phase 0.7b; the root is offline, so OpenBao has no `pki_root` mount)
+3. Install the homelab root CA cert as `/usr/local/share/ca-certificates/homelab-root-ca.crt` and run `update-ca-certificates` (→ `/etc/ssl/certs/homelab-root-ca.pem`), from homelab-infra `pki/homelab-root-ca.crt` (Phase 0.7b; the root is offline, so OpenBao has no `pki_root` mount)
 4. Configure PAM to consult `vault-ssh-helper`:
    ```
    # /etc/pam.d/sshd  — add at the top of "auth" block

@@ -753,7 +753,7 @@ Then set `vault_baseline_openbao_seal: gcpckms` in `group_vars/vault.yaml`, chec
 
 ### Phase 0.7: PKI — Offline Root, OpenBao Intermediate, TLS Listener
 
-**Goal:** OpenBao becomes the homelab's internal certificate authority, and its own API moves from the Phase 0.5 plain-HTTP bootstrap to TLS with a certificate it issues and renews itself. Later tiers depend on this: cert-manager's Vault issuer and ESO (Tier 2), node and agent trust at `/etc/ssl/certs/homelab-root-ca.crt` (Tiers 1–3), and `https://vault.homelab.internal:8200`.
+**Goal:** OpenBao becomes the homelab's internal certificate authority, and its own API moves from the Phase 0.5 plain-HTTP bootstrap to TLS with a certificate it issues and renews itself. Later tiers depend on this: cert-manager's Vault issuer and ESO (Tier 2), node and agent trust at `/etc/ssl/certs/homelab-root-ca.pem` (Tiers 1–3), and `https://vault.homelab.internal:8200`.
 
 > **Reconciled 2026-11-08 (HOMELAB-52)** with the HOMELAB-51 decisions and what Phases 0.5–0.6 taught us. Each correction was checked against OpenBao 2.6.5 on a scratch dev server. Corrections to the earlier draft:
 > - **The root is offline.** The draft generated it inside OpenBao (`pki_root`) and then "disabled the mount until rotation time". **`bao secrets disable` deletes the mount's data, keys included**, so that would have destroyed the root key. Disabling never "parks" a CA. The root is now made outside OpenBao by a ceremony script (0.7b), following [OpenBao's PKI considerations](https://openbao.org/docs/secrets/pki/considerations/).
@@ -919,7 +919,7 @@ The script is `pki/openbao-pki.sh listener` in homelab-infra (README, "OpenBao T
 
 **Ansible (`vault_baseline`) changes, all at once:**
 
-- **Trust:** the root at `/usr/local/share/ca-certificates/homelab-root-ca.crt`, then `update-ca-certificates`, giving `/etc/ssl/certs/homelab-root-ca.crt`, the path later tiers use. The chain (intermediate + root) at `/etc/openbao/ca.pem` (`0444`). Both come from the committed files in `pki/`.
+- **Trust:** the root at `/usr/local/share/ca-certificates/homelab-root-ca.crt`, then `update-ca-certificates`, giving `/etc/ssl/certs/homelab-root-ca.pem` (Ubuntu names the link `.pem` whatever the source extension), the path later tiers use. The chain (intermediate + root) at `/etc/openbao/ca.pem` (`0444`). Both come from the committed files in `pki/`.
 - **Listener and addresses:**
 
 ```hcl
@@ -1003,10 +1003,10 @@ done   # 200 from the active node, 429 from standbys: both mean TLS validated
 | Root certificate (source of truth) | homelab-infra `pki/homelab-root-ca.crt` | committed in 0.7b |
 | Intermediate certificate | homelab-infra `pki/homelab-intermediate-2026.crt` | committed in 0.7c |
 | Root key | `pass` `homelab/pki/root-ca-key` + encrypted copy in the safe | 0.7b ceremony; never on a node |
-| Vault nodes: system trust | `/etc/ssl/certs/homelab-root-ca.crt` | `vault_baseline` (0.7d) |
+| Vault nodes: system trust | `/etc/ssl/certs/homelab-root-ca.pem` | `vault_baseline` (0.7d) |
 | Vault nodes: chain for OpenBao and `bao` | `/etc/openbao/ca.pem` | `vault_baseline` (0.7d) |
 | Workstation | `VAULT_CACERT` → the repo file; optionally the keychain | 0.7d |
-| Tier 1+ VMs | `/etc/ssl/certs/homelab-root-ca.crt` | Tier 1 Ansible, from the repo file |
+| Tier 1+ VMs | `/etc/ssl/certs/homelab-root-ca.pem` | Tier 1 Ansible, from the repo file |
 | Kubernetes | `homelab-root-ca` ConfigMap / `caBundle` | Tier 2, from the repo file |
 
 The root certificate is public and needs no `pass` entry. OpenBao has no `pki_root` mount; consumers read the root from the repo, or from `pki_int/issuer/homelab-root`.
