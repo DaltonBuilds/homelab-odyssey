@@ -953,12 +953,13 @@ storage "raft" {
 cd ~/build/homelab-infra
 pki/openbao-pki.sh listener                 # 1. all three certificates; plain terminal
 
-B="mise exec -- ansible-playbook ansible/playbooks/vault-baseline.yaml -e vault_baseline_openbao_tls=true"
-$B --check --diff --limit vault-03          # 2.
-$B -e vault_baseline_openbao_restart=true --diff --limit vault-03   # 3. standbys, one at a time
-$B -e vault_baseline_openbao_restart=true --diff --limit vault-02
+# A function, not a variable: zsh does not word-split unquoted variables.
+b() { mise exec -- ansible-playbook ansible/playbooks/vault-baseline.yaml -e vault_baseline_openbao_tls=true "$@"; }
+b --check --diff --limit vault-03          # 2.
+b -e vault_baseline_openbao_restart=true --diff --limit vault-03   # 3. standbys, one at a time
+b -e vault_baseline_openbao_restart=true --diff --limit vault-02
 pki/openbao-pki.sh step-down                # 4. the active node hands over
-$B -e vault_baseline_openbao_restart=true --diff --limit vault-01   # 5. the old active node
+b -e vault_baseline_openbao_restart=true --diff --limit vault-01   # 5. the old active node
 ```
 
 Then set `vault_baseline_openbao_tls: true` in `group_vars/vault.yaml`. A repeat `--check` must show `changed=0`, and `vault-verify.yaml` must pass. Mixed HTTP and HTTPS nodes are fine between restarts: Raft and forwarding use 8201's own TLS, and joined nodes ignore `retry_join`.
