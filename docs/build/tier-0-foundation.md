@@ -891,7 +891,7 @@ bao write pki_int/roles/openbao-listener issuer_ref=default \
   ttl=720h max_ttl=720h
 ```
 
-- **30 days, renewed at about two-thirds** by the agent (0.7e), so a stopped agent leaves about 10 days of headroom.
+- **30 days, renewed at about 3.3 days left** by the agent (0.7e). OpenBao 2.6.5's `pkiCert` renews at 1/9 of the lifetime left, and that isn't configurable. A stopped agent leaves about 3 days of headroom; `vault-verify.yaml` fails below 2.
 - **The client flag is deliberate:** the same certificate is the node's cert-auth identity for renewal.
 - **Stored, not `no_store`,** so a listener certificate can be revoked by serial.
 - Anything else is refused: `common name evil.homelab.internal not allowed by this role`, `the IP address "192.168.40.99" is not allowed in this role`.
@@ -980,21 +980,24 @@ done   # 200 from the active node, 429 from standbys: both mean TLS validated
 
 **Design:**
 
-- **The agent.** Each node runs `bao agent` (shipped in the openbao package) as `openbao-agent.service`, user `openbao`, hardened like the server unit.
+- **The agent.** Each node runs `bao agent` (shipped in the openbao package) as a oneshot, `openbao-agent.service` with `exit_after_auth = true`, started by `openbao-agent.timer`: 5 minutes after boot, then every 6h with up to 30 minutes of random delay. It runs as `openbao` with the server unit's hardening, except `ProtectSystem=strict` with only `/etc/openbao/tls` writable (the server's `full` makes `/etc` read-only) and `ProtectHome=tmpfs` (`bao` exits on EACCES for `~/.bao`, but skips ENOENT).
 - **Login.** The agent logs in with **cert auth**, using the node's current listener certificate (it has the client flag), so there's no static secret. The cert-auth role trusts the `pki_int` issuer and allows only `vault-0[1-3].homelab.internal`. It issues a short-TTL token with one policy, `openbao-listener-renew`: `create`/`update` on `pki_int/issue/openbao-listener` and nothing else. A checked-in, idempotent script applies the auth mount, role and policy with the root token.
-- **Renewal.** A `pkiCert` template renews at about two-thirds of the TTL. It writes the combined `listener.pem` atomically (render to a temporary file, then rename).
+- **Renewal.** A `pkiCert` template whose destination is `listener.pem`. `pkiCert` reads the live file first and issues a new certificate only when 1/9 of the current one's lifetime or less is left: 3.3 days of 30, hardcoded in openbao-template v1.0.1. The write is atomic (a temporary file in the same directory, then a rename), `0400`, and keeps no `.bak` (it would hold the old key). The chain comes from `/etc/openbao/ca.pem`: `pkiCert` keeps only one CA certificate and, reading the live file, would keep the root and drop the intermediate. An unchanged render is byte-identical, so most runs write nothing.
+- **Why a timer, not a long-running agent.** Between checks, a long-running agent sleeps 87–92% of the time remaining. In about one cycle in three it wakes just above the 1/9 threshold, then next renews with only 8–11 hours left. A oneshot every 6h renews at 3.1–3.3 days left, every cycle (decided 2026-11-15, HOMELAB-56).
 - **Reload.** Because 2.6.5 has no `tls_auto_reload`, the server must be told. The cleanest path keeps the agent unprivileged: a root-owned systemd `openbao-tls.path` unit watches `listener.pem` and triggers `systemctl reload openbao` (SIGHUP: no restart, no reseal; the same reload logrotate already uses). Verified on 2.6.5: after SIGHUP the listener serves the new serial. 0.7e must prove the path unit fires on the agent's rename and that one reload per renewal is all it triggers.
 
 **Failure modes (runbook):**
 
 | Failure | Effect | Action |
 |---|---|---|
-| Agent stopped or crashing | The current certificate runs to expiry: about 10 days of headroom from the two-thirds point | `vault-verify.yaml` alerts below 7 days; fix and restart the agent |
-| OpenBao sealed or unreachable | The agent retries | Fix the cluster; renewal resumes |
-| Certificate expired | **The agent can't log in:** its identity is the expired certificate | `pki/openbao-pki.sh listener <node>` (root token from `pass`; it handles the expired loopback), then restart the agent |
+| Agent runs failing, or the timer stopped | The current certificate runs to expiry: about 3.3 days of headroom from the renewal point | `vault-verify.yaml` fails on the timer or the last run, and below 2 days left; `journalctl -u openbao-agent`, fix, `systemctl start openbao-agent` |
+| OpenBao sealed or unreachable | That run fails after its retries | Fix the cluster; the next timer run renews |
+| Certificate expired | **The agent can't log in:** its identity is the expired certificate | `LISTENER_FORCE=1 pki/openbao-pki.sh listener <node>` (root token from `pass`; it handles the expired loopback) |
 | Reload unit missing or failed | A new file on disk, the old certificate served | `vault-verify.yaml` compares the served serial with the file serial; `systemctl reload openbao` |
 
-**Proof:** with a temporarily short TTL (for example 10m), observe at least one automatic renewal per node. The listener serves the new serial with no restart, and OpenBao and clients are unaffected. Then restore 30 days.
+**Proof:** with a temporarily short TTL (for example 10m), observe at least one automatic renewal per node. The listener serves the new serial with no restart, and OpenBao and clients are unaffected. Then restore 30 days. *Done 2026-11-15 (vault-03, two renewals) and 2026-11-21 (vault-01, vault-02): one reload per renewal, served serial = file serial, same PID, unsealed throughout (HOMELAB-56).*
+
+Restore in this order: issue a 30-day certificate with the script first, then re-apply the normal settings. The other way round, the agent leaves the short certificate alone at 6h checks and it expires.
 
 #### Where the trust anchors live
 
@@ -1013,14 +1016,53 @@ The root certificate is public and needs no `pass` entry. OpenBao has no `pki_ro
 
 #### Verification (HOMELAB-57)
 
-- [ ] `pki/root-ca.sh check <safe copy>`: the root, the `pass` entry and the safe copy agree; the fingerprint matches HOMELAB-53
-- [ ] `curl --cacert pki/homelab-root-ca.crt https://192.168.40.2X:8200/v1/sys/health` validates on all three nodes; `openssl s_client -tls1_2` is refused
-- [ ] `bao read pki_int/issuer/default` is `homelab-intermediate-2026`, P-256, chaining to the root, with the name constraints
-- [ ] Test issuance from both roles, as in 0.7c; the listener role refuses names and IPs outside its list
-- [ ] Each node's agent has renewed at least once (served serial = file serial, no restart); `vault-verify.yaml` passes with ≥ 7 days of headroom
-- [ ] Cold restart (all three off, then on) and leader failover still work under TLS; `retry_join` reconnects over HTTPS
-- [ ] The API reaches VLANs 50/60 again; the package's `/opt/openbao/tls` pair is gone
-- [ ] Handoff notes for 0.8
+- [x] `pki/root-ca.sh check <safe copy>`: the root, the `pass` entry and the safe copy agree; the fingerprint matches HOMELAB-53. *2026-11-21: root and `pass` entry agree, and the fingerprint matches. The safe copy was not re-read this time; it last passed `check <copy>` at the 2026-11-09 ceremony (HOMELAB-53). Re-check it at the next ceremony or whenever it comes out of the safe.*
+- [x] `curl --cacert pki/homelab-root-ca.crt https://192.168.40.2X:8200/v1/sys/health` validates on all three nodes; `openssl s_client -tls1_2` is refused. *2026-11-21: 429/429/200, TLS 1.2 refused on all three.*
+- [x] `bao read pki_int/issuer/default` is `homelab-intermediate-2026`, P-256, chaining to the root, with the name constraints. *2026-11-21, `pki/openbao-pki.sh check`.*
+- [x] Test issuance from both roles, as in 0.7c; the listener role refuses names and IPs outside its list. *2026-11-21, `pki/openbao-pki.sh check`.*
+- [x] Each node's agent has renewed at least once (served serial = file serial, no restart); `vault-verify.yaml` passes with ≥ 2 days of headroom. *vault-03 2026-11-15, vault-01/02 2026-11-21 (HOMELAB-56).*
+- [x] Cold restart (all three off, then on) and leader failover still work under TLS; `retry_join` reconnects over HTTPS. *Cold restart 2026-11-21: `qm stop` on all three, unsealed 12–14 s after start, leader elected 16 s later, 3 voters healthy, audit writing, no `http://` in the boot logs. A joined node reconnects over Raft and doesn't need `retry_join`: the config renders `https://` and each node logs `raft retry join initiated`. A real join over HTTPS waits for the first node rebuild. Planned failover and standby restarts: HOMELAB-55 rollout, 2026-11-14.*
+- [x] The API reaches VLANs 50/60 again; the package's `/opt/openbao/tls` pair is gone. *Node firewalls allow 8200 from both VLANs, and the pair is gone on all three. The end-to-end test waits for a Tier 1 host (see the handoff).*
+- [x] Handoff notes for 0.8 (below)
+
+#### Handoff to 0.8 (HOMELAB-57)
+
+**CA hierarchy.** All certificates are in homelab-infra `pki/`, and all of it is public.
+
+| | Subject | Key | Valid until | SHA-256 |
+|---|---|---|---|---|
+| Root | `CN=Homelab Root CA` | P-384, `pathlen:1` | 2036-11-09 | `2A:2B:A6:2F:A1:C5:95:70:FD:17:55:AB:A9:37:88:62:EB:8F:BB:A3:68:7B:00:15:3D:19:ED:2B:BE:00:5C:B8` |
+| Intermediate `homelab-intermediate-2026` | `CN=Homelab Intermediate CA` | P-256, `pathlen:0`, DNS constraints `homelab.internal`, `cluster.local`, `localhost` | 2031-11-14 | `36:BA:F3:B4:D3:01:B1:58:8D:8A:41:86:C1:48:85:B8:25:BD:C7:54:36:D8:94:4C:84:FB:03:AD:5F:F4:45:FA` |
+
+- **Root key:** `pass` `homelab/pki/root-ca-key`, plus a passphrase-encrypted copy in the safe. It has never been on a node or in OpenBao. The next ceremony is a new intermediate (`pki/root-ca.sh sign`) well before 2031-11-14; plan it for 2031-05. Leaf lifetimes are capped by the intermediate's.
+- **Roles on `pki_int`:**
+  - `internal-services`: 24h, `no_store`, for Tier 2+ via cert-manager. Split it per consumer and exclude `vault*.homelab.internal` when cert-manager arrives.
+  - `openbao-listener`: 30d, stored, the three nodes' names and IPs only, with the client flag.
+- **Trust distribution:** see [Where the trust anchors live](#where-the-trust-anchors-live). Every consumer gets the full chain, because AIA and CRL URLs on `vault.homelab.internal` don't resolve until Tier 2's VyOS static mapping.
+
+**Renewal.** See 0.7e: a oneshot OpenBao Agent on a 6h timer, cert auth with the listener certificate itself (`auth/cert`, role `openbao-listener`, policy `openbao-listener-renew`, 1h tokens bound to `127.0.0.1/32`). It renews at about 3.3 days left, and a root `openbao-tls.path` sends SIGHUP. The failure modes table is above. Certificates expire independently per node, so one node's agent failing affects only that node.
+
+**Client conventions.**
+- **On the nodes:** `/etc/environment` sets `VAULT_ADDR=https://127.0.0.1:8200` and `VAULT_CACERT=/etc/openbao/ca.pem`, so `ssh dalton@<node> bao …` needs no flags.
+- **Workstation:** homelab-infra `mise.toml` sets `VAULT_CACERT` to the committed root. Admin work stays on the active node's localhost over SSH, with the root token piped from `pass`, until 0.8+ replaces root-token use with scoped policies.
+- **Tier 1+:** trust `/etc/ssl/certs/homelab-root-ca.pem`.
+
+**Who owns what.**
+
+| Owner | What |
+|---|---|
+| Ansible (`vault_baseline`) | trust store and `ca.pem`, listener and `retry_join` config, firewall (8200 to VLANs 40/10/50/60, 8201 to peers), `/etc/environment`, the agent and its units, `vault-verify.yaml` |
+| Scripts, root token, plain terminal | `pki/root-ca.sh` (ceremony, `sign`, `check`); `pki/openbao-pki.sh apply`, `check`, `listener` (first issue and expired-cert recovery), `agent-auth`, `cluster`, `step-down` |
+| Manual | root key custody and the ceremony; planned restarts (`-e vault_baseline_openbao_restart=true`, standbys first); cold restarts |
+
+**Readiness.**
+- **Transit (0.8):** nothing in 0.7 blocks it. Enable `transit/` and write its policies on the active node like the PKI steps. `pki/openbao-pki.sh cluster` gives a quick before/after health check.
+- **Workload Identity Federation (Future Upgrades):** the CA, trust distribution and TLS are in place. Anything that must reach OpenBao by name needs `vault.homelab.internal` from Tier 2 first.
+
+**Open items carried forward.**
+- **VLAN 50/60 reachability is verified only at the node firewalls.** UniFi routes between those VLANs and VLAN 40, and its policy hasn't been exercised: no host exists there yet. Test from the first Tier 1 host on VLAN 50 or 60.
+- **Raft leader loss takes about 15s, not ~5s.** OpenBao's Raft runs with a 15s heartbeat and election timeout. In the cold restart, vault-03 started its election 16s after unseal. The Tier 0 gate's leader-loss item expects ~5s. Either lower `performance_multiplier`, or correct the expectation before that gate is run.
+- **The `gcpckms` seal is deprecated in the binary.** OpenBao 2.6.5 warns that the built-in mechanism moves to an external plugin and will be removed in the next minor release. That's the ADR-006 seal-plugin spike, and it gates any upgrade past 2.6.x.
 
 ---
 
@@ -1215,7 +1257,7 @@ You may not advance to Tier 1 until **every** item below passes.
 - [ ] `bao operator raft list-peers` shows three voters
 - [ ] Cold-restart test passes (power off all three, power on, all auto-unseal without intervention)
 - [ ] Raft leader-loss test passes (stop leader, new leader elected within ~5s, old leader rejoins as follower on restart)
-- [ ] Vault listener is on TLS 1.3 with a cert issued by `pki_int` (`https://`, not `http://`), renewed by the OpenBao Agent; `vault-verify.yaml` shows ≥ 7 days of headroom
+- [ ] Vault listener is on TLS 1.3 with a cert issued by `pki_int` (`https://`, not `http://`), renewed by the OpenBao Agent; `vault-verify.yaml` shows ≥ 2 days of headroom
 
 #### Engines configured
 
